@@ -1,0 +1,88 @@
+name: Sync to Hugging Face Space
+
+# Manual-only: this workflow does NOT run automatically on push. Trigger it
+# yourself from the Actions tab (Actions → Sync to Hugging Face Space →
+# Run workflow) whenever you want to push the current main branch to the
+# Space. Requires three repository secrets, set under Settings → Secrets
+# and variables → Actions:
+#
+#   HF_TOKEN       — a Hugging Face access token with WRITE permission
+#                    (huggingface.co → Settings → Access Tokens)
+#   HF_USERNAME    — your Hugging Face username (can differ from GitHub)
+#   HF_SPACE_NAME  — the Space's name (the part after the username in
+#                    huggingface.co/spaces/<username>/<space-name>)
+#
+# Push strategy: try a normal push first (safest — fails loudly if the
+# Space has commits this branch doesn't know about), then fall back to
+# --force, then --force-with-lease, stopping at the first one that works.
+# Force-pushing overwrites the Space's git history with this repo's —
+# only use this if GitHub is meant to be the single source of truth for
+# the Space.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  sync-to-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          
+      - name: Install Git Xet
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh | sh
+          git xet --version
+      - name: Verify Xet
+        run: |
+          which git-xet
+          git xet --version
+          git xet install
+          
+      - name: Track large binaries via Git LFS/Xet
+        run: |
+          git lfs install
+          git lfs migrate import --everything --include="*.png"
+          
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}
+        run: |
+          set -e
+          
+          git xet install
+          
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_USERNAME" ] || [ -z "$HF_SPACE_NAME" ]; then
+            echo "Missing one of HF_TOKEN / HF_USERNAME / HF_SPACE_NAME secrets — see workflow header for setup steps."
+            exit 1
+          fi
+
+          REMOTE="https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}"
+          git remote remove hf-space 2>/dev/null || true
+          git remote add hf-space "$REMOTE"
+
+          echo "== Attempt 1: normal push =="
+          if git push hf-space HEAD:main; then
+            echo "Normal push succeeded."
+            exit 0
+          fi
+
+          echo "== Attempt 2: force push =="
+          if git push hf-space HEAD:main --force; then
+            echo "Force push succeeded."
+            exit 0
+          fi
+
+          echo "== Attempt 3: force-with-lease =="
+          if git push hf-space HEAD:main --force-with-lease; then
+            echo "Force-with-lease push succeeded."
+            exit 0
+          fi
+
+          echo "All three push strategies failed — check the Space name/username/token."
+          exit 1
