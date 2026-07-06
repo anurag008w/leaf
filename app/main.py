@@ -30,8 +30,34 @@ _token_users = {}  # token -> username
 COOKIE_NAME = "zone_session"
 config_cache = {"data": None, "mtime": 0}
 USERS_FILE = DATA_DIR / "users.json"
+SESSIONS_FILE = DATA_DIR / "sessions.json"
 GUEST_PREFIX = "guest_"
 SECRET_KEY = os.environ.get("ZONE_SECRET", "").strip()
+
+def load_sessions() -> None:
+    """Restore active sessions from disk so a container restart doesn't log everyone out."""
+    if not SESSIONS_FILE.exists():
+        return
+    try:
+        saved = json.loads(SESSIONS_FILE.read_text())
+        for token, uname in saved.get("token_users", {}).items():
+            _active_tokens.add(token)
+            _token_users[token] = uname
+        for token in saved.get("guest_tokens", []):
+            _active_tokens.add(token)
+    except Exception:
+        pass
+
+def save_sessions() -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        guest_tokens = [t for t in _active_tokens if is_guest(t)]
+        SESSIONS_FILE.write_text(json.dumps({
+            "token_users": _token_users,
+            "guest_tokens": guest_tokens,
+        }, indent=2))
+    except Exception:
+        pass
 
 def get_secret() -> bytes:
     global SECRET_KEY
@@ -161,8 +187,8 @@ def save_reset_keys(keys: list) -> None:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = ("/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup")
-    if path in exempt or any(path.startswith(p) for p in ("/api/login", "/api/guest-login", "/api/signup")):
+    exempt = ("/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password")
+    if path in exempt or any(path.startswith(p) for p in ("/api/login", "/api/guest-login", "/api/signup", "/api/reset-password")):
         return await call_next(request)
     token = request.cookies.get(COOKIE_NAME, "")
     if not token or token not in _active_tokens:
@@ -177,6 +203,7 @@ def make_session(username: str) -> str:
     token = secrets.token_hex(32)
     _active_tokens.add(token)
     _token_users[token] = username
+    save_sessions()
     return token
 
 def resp_with_token(token: str, data: dict):
@@ -254,6 +281,7 @@ def migrate_to_encrypted(uname: str):
 async def guest_login():
     token = GUEST_PREFIX + secrets.token_hex(16)
     _active_tokens.add(token)
+    save_sessions()
     resp = JSONResponse({"token": token, "guest": True})
     resp.set_cookie(COOKIE_NAME, token, max_age=86400 * 30, httponly=True, samesite="lax")
     return resp
@@ -263,6 +291,7 @@ async def logout(request: Request):
     token = request.cookies.get(COOKIE_NAME, "")
     _active_tokens.discard(token)
     _token_users.pop(token, None)
+    save_sessions()
     resp = JSONResponse({"status": "ok"})
     resp.set_cookie(COOKIE_NAME, "", max_age=0)
     return resp
@@ -306,6 +335,16 @@ async def auth_check(request: Request):
 async def startup():
     load_config()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    load_sessions()
+    if not os.environ.get("ZONE_SECRET", "").strip():
+        get_secret()  # materialize/load secret.key now so the warning below is accurate
+        print(
+            "WARNING: ZONE_SECRET is not set. A key was generated and saved to "
+            f"{DATA_DIR / 'secret.key'}. If that path isn't on persistent storage, "
+            "it will be regenerated on next restart and ALL previously encrypted "
+            "user data will become permanently undecryptable. Set ZONE_SECRET to "
+            "a fixed value to avoid this."
+        )
     asyncio.create_task(auto_sync_loop())
 
 # ─── Sync state tracking ─────────────────────────
@@ -432,13 +471,18 @@ async def sync_user_from_hf(uname: str) -> dict:
             stem = rf.stem
             remote_keys.add(stem)
             raw = rf.read_bytes()
-            # if encrypted, decrypt first
-            if is_encrypted(uname):
+            # config is never encrypted on upload — only USER_DATA_KEYS files are
+            if stem != "config" and is_encrypted(uname):
                 try:
                     plain = user_fernet(uname).decrypt(raw)
                     data = json.loads(plain)
                 except Exception:
-                    data = json.loads(raw)
+                    raise RuntimeError(
+                        f"Could not decrypt remote '{stem}' for user '{uname}'. "
+                        "This usually means ZONE_SECRET changed (or was never set "
+                        "and got regenerated on a restart) since this backup was "
+                        "created. The data is not recoverable with the current key."
+                    )
             else:
                 data = json.loads(raw)
             if stem == "config":
