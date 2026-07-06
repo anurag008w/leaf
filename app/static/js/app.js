@@ -1,0 +1,2394 @@
+/* ═══════════════════════════════════════════════════
+   Zone — Study OS  |  Console v4 (Clean Design)
+   ═══════════════════════════════════════════════════ */
+
+const ZoneApp = (() => {
+  'use strict';
+
+  const state = {
+    config: null, tracks: null,
+    tab: 'console', // console | wallpapers
+    currentZoneIdx: 0, cycle: 0, blockIdx: 0,
+    remaining: 0, total: 0,
+    running: false, completed: false,
+    blockDone: [],
+    byZone: {},
+    dayComplete: false,
+    theme: 'dark', onboarded: false,
+    sidebarOpen: true, fullscreen: false,
+    events: [],
+    stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
+    tracking: { log: [], zoneStats: {}, sessionCount: 0 },
+    settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true },
+    examTrack: null,
+    wpStyle: 'mission_control', wpSize: 'mobile',
+    audioCtx: null, timerHandle: null, notifAsked: false
+  };
+
+  let $root, $toastContainer;
+
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const uid = () => Math.random().toString(36).slice(2,9);
+
+  function fmtTime(s) {
+    s = Math.max(0, Math.round(s));
+    return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  }
+
+  function hexToRgb(h, a = 1) {
+    const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function to12h(t) {
+    if (!t) return '→ open';
+    const [h, m] = t.split(':').map(Number);
+    const suf = h < 12 ? 'AM' : 'PM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${String(m).padStart(2,'0')} ${suf}`;
+  }
+
+  function todayKey() { return new Date().toISOString().slice(0,10); }
+
+  const ICONS = { calendar: '📅', settings: '⚙️', stats: '📊', console: '🎯', wallpaper: '🖼' };
+
+  let defaultEventsCache = null;
+  let defaultEventsYear = null;
+
+  function generateHolidays(year) {
+    const y = year;
+    const e = (m, d, t, c, note) => ({ date: `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`, title: t, type: c, color: c === 'national' ? '#FF8A3D' : c === 'festival' ? '#FBBF24' : '#6B7686', note: note || '' });
+
+    const fixed = [
+      e(1, 26, '🇮🇳 Republic Day', 'national'),
+      e(2, 14, 'Valentine\'s Day', 'observance'),
+      e(3, 8, 'International Women\'s Day', 'observance'),
+      e(4, 1, 'April Fool\'s Day', 'observance'),
+      e(4, 14, 'Ambedkar Jayanti', 'national'),
+      e(5, 1, 'Labour Day', 'national'),
+      e(5, 10, 'Mother\'s Day', 'observance'),
+      e(6, 21, 'International Yoga Day', 'observance'),
+      e(6, 21, 'Father\'s Day', 'observance'),
+      e(7, 1, 'National Doctors\' Day', 'observance'),
+      e(8, 15, '🇮🇳 Independence Day', 'national'),
+      e(9, 5, 'Teachers\' Day', 'observance'),
+      e(10, 2, '🕊️ Gandhi Jayanti', 'national'),
+      e(10, 31, 'Halloween', 'observance'),
+      e(11, 14, 'Children\'s Day', 'observance'),
+      e(12, 25, '🎄 Christmas', 'festival'),
+      e(12, 31, 'New Year\'s Eve', 'observance'),
+    ];
+
+    const approx = [
+      { m: 1, d: 14, t: 'Makar Sankranti / Pongal', c: 'festival' },
+      { m: 1, d: 15, t: 'Pongal (Day 2)', c: 'festival' },
+      { m: 2, d: 19, t: 'Maha Shivaratri', c: 'festival' },
+      { m: 3, d: 8, t: 'Holi', c: 'festival' },
+      { m: 3, d: 22, t: 'Ugadi / Gudi Padwa', c: 'festival' },
+      { m: 3, d: 28, t: 'Good Friday', c: 'observance' },
+      { m: 4, d: 1, t: 'Eid ul-Fitr', c: 'festival' },
+      { m: 4, d: 5, t: 'Easter Sunday', c: 'observance' },
+      { m: 4, d: 14, t: 'Baisakhi / Vishu', c: 'festival' },
+      { m: 4, d: 15, t: 'Pohela Boishakh (Bengali New Year)', c: 'festival' },
+      { m: 6, d: 8, t: 'Rath Yatra', c: 'festival' },
+      { m: 8, d: 20, t: 'Janmashtami', c: 'festival' },
+      { m: 8, d: 29, t: 'Ganesh Chaturthi', c: 'festival' },
+      { m: 9, d: 8, t: 'Eid ul-Adha (Bakrid)', c: 'festival' },
+      { m: 10, d: 2, t: 'Mahalaya', c: 'festival' },
+      { m: 10, d: 12, t: 'Dussehra / Durga Puja', c: 'festival' },
+      { m: 10, d: 20, t: '🪔 Diwali', c: 'festival' },
+      { m: 10, d: 21, t: 'Govardhan Puja', c: 'festival' },
+      { m: 10, d: 22, t: 'Bhai Dooj', c: 'festival' },
+      { m: 10, d: 30, t: 'Chhath Puja', c: 'festival' },
+      { m: 11, d: 4, t: 'Guru Nanak Jayanti', c: 'festival' },
+    ];
+
+    const apprEvents = approx.map(a => {
+      const ev = e(a.m, a.d, a.t, a.c);
+      ev.note = 'Approximate date';
+      return ev;
+    });
+
+    return [...fixed, ...apprEvents];
+  }
+
+  function getDefaultEvents() {
+    if (!state.settings.showDefaultEvents) return [];
+    const year = calYear || new Date().getFullYear();
+    if (defaultEventsYear === year && defaultEventsCache) return defaultEventsCache;
+    defaultEventsYear = year;
+    defaultEventsCache = generateHolidays(year).map(h => ({
+      ...h, id: 'default-' + h.date + '-' + h.title.replace(/[^a-z0-9]/gi,'').slice(0,8), default: true
+    }));
+    return defaultEventsCache;
+  }
+
+  function getMergedEvents() {
+    return [...getDefaultEvents(), ...state.events];
+  }
+
+  function isGuest() { return !!localStorage.getItem('zone_guest'); }
+
+  function storage() {
+    const pre = isGuest() ? 'zg:' : 'zu:';
+    try {
+      return {
+        get: k => {
+          let v = localStorage.getItem(pre + k);
+          if (v === null && pre === 'zu:') v = localStorage.getItem('zone:' + k); // migrate old key
+          return v ? JSON.parse(v) : null;
+        },
+        set: (k, v) => localStorage.setItem(pre + k, JSON.stringify(v)),
+        remove: k => { localStorage.removeItem(pre + k); localStorage.removeItem('zone:' + k); }
+      };
+    } catch { return { get: () => null, set: () => {}, remove: () => {} }; }
+  }
+
+  async function saveUserDataToServer(key) {
+    if (isGuest()) return;
+    try {
+      await fetchJSON('/api/user-data', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ key, value: state[key] })
+      });
+    } catch {}
+  }
+
+  function saveState() {
+    const session = {
+      currentZoneIdx: state.currentZoneIdx,
+      byZone: state.byZone,
+      dayComplete: state.dayComplete
+    };
+    storage().set('session', session);
+    storage().set('events', state.events);
+    storage().set('stats', state.stats);
+    storage().set('tracking', state.tracking);
+    storage().set('settings', state.settings);
+    storage().set('examTrack', state.examTrack);
+    if (!isGuest()) {
+      saveUserDataToServer('session', session);
+      saveUserDataToServer('stats');
+      saveUserDataToServer('tracking');
+      saveUserDataToServer('events');
+      saveUserDataToServer('settings');
+    }
+  }
+
+  function loadSession() { return storage().get('session'); }
+
+  function saveConfig() {
+    storage().set('config', state.config);
+    try { apiUpdateConfig(state.config); } catch {}
+  }
+
+  // ─── Sound ───────────────────────────────────
+  function beep(freq = 880, dur = 140, delay = 0, vol = 0.05) {
+    try {
+      if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = state.audioCtx;
+      setTimeout(() => {
+        const osc = ctx.createOscillator(), gain = ctx.createGain();
+        osc.frequency.value = freq; osc.type = 'sine';
+        gain.gain.value = vol;
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime + dur/1000);
+      }, delay);
+    } catch {}
+  }
+
+  function chime(kind) {
+    if (!state.settings.soundEnabled) return;
+    if (kind === 'transition') { beep(660,120,0); beep(880,140,140); }
+    if (kind === 'breakstart') { beep(500,180,0); }
+    if (kind === 'complete') { beep(660,120,0); beep(880,120,150); beep(1046,220,300); }
+    if (kind === 'tick') { beep(440,30,0,0.03); }
+  }
+
+  function notifSend(title, body) {
+    if (!state.settings.notifEnabled || state.settings.quietMode) return;
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      try { new Notification(title, { body }); } catch {}
+    }
+  }
+
+  async function notifRequest() {
+    if (state.notifAsked) return;
+    state.notifAsked = true;
+    if ('Notification' in window && Notification.permission === 'default')
+      await Notification.requestPermission();
+  }
+
+  // ─── API ─────────────────────────────────────
+  async function fetchJSON(url, opts = {}) {
+    opts.credentials = 'same-origin';
+    const r = await fetch(url, opts);
+    if (r.status === 401) { window.location.href = '/login.html'; return null; }
+    if (!r.ok) throw new Error('API error: ' + r.status);
+    return r.json();
+  }
+  const apiConfig = () => fetchJSON('/api/config');
+  const apiTracks = () => fetchJSON('/api/exam-tracks');
+  const apiUpdateConfig = (data) => fetchJSON('/api/config', {
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  });
+
+  // ─── Toast ───────────────────────────────────
+  function toast(msg, type = 'info', dur = 3500) {
+    const el = document.createElement('div');
+    el.className = 'toast ' + type;
+    el.innerHTML = `<span>${type === 'success' ? '✓' : type === 'warning' ? '⚠' : type === 'error' ? '✕' : 'ℹ'}</span><span>${msg}</span>`;
+    $toastContainer.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(8px)'; setTimeout(() => el.remove(), 300); }, dur);
+  }
+
+  function confetti() {
+    const colors = ['#6c5ce7','#a29bfe','#fd79a8','#00b894','#fdcb6e','#ff7675','#74b9ff','#00cec9'];
+    for (let i = 0; i < 50; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti-piece';
+      el.style.left = Math.random() * 100 + '%'; el.style.top = '-10px';
+      el.style.background = colors[i % colors.length];
+      el.style.animationDuration = (2 + Math.random() * 3) + 's';
+      el.style.animationDelay = Math.random() * 0.8 + 's';
+      el.style.width = (4 + Math.random() * 8) + 'px';
+      el.style.height = (4 + Math.random() * 8) + 'px';
+      el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 5000);
+    }
+  }
+
+  // ─── Tracking Engine ──────────────────────────
+  function getTodayLog() { return state.tracking.log.filter(e => e.date === todayKey()); }
+
+  function logEvent(type, data = {}) {
+    const entry = { id: uid(), date: todayKey(), time: new Date().toISOString(), type, ...data };
+    state.tracking.log.push(entry);
+    if (state.tracking.log.length > 5000) state.tracking.log = state.tracking.log.slice(-3000);
+
+    const z = getZone(state.currentZoneIdx);
+    const zi = state.currentZoneIdx;
+    if (!state.tracking.zoneStats[zi]) state.tracking.zoneStats[zi] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+    if (type === 'session_complete') {
+      state.tracking.zoneStats[zi].sessions++;
+      state.tracking.zoneStats[zi].totalMin += (data.duration || z?.focusDuration || 25);
+    }
+    if (type === 'skip_block') state.tracking.zoneStats[zi].skips++;
+    if (type === 'pause') state.tracking.zoneStats[zi].pauses = (state.tracking.zoneStats[zi].pauses || 0) + 1;
+    if (type === 'zone_complete') state.tracking.zoneStats[zi].completes++;
+    if (type === 'session_start') state.tracking.sessionCount++;
+    saveState();
+  }
+
+  function getTrackingStats() {
+    const log = state.tracking.log;
+    const today = todayKey();
+    const todayEvents = log.filter(e => e.date === today);
+    const sessionsToday = todayEvents.filter(e => e.type === 'session_complete').length;
+    const skipsToday = todayEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+    const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
+      .reduce((a, e) => a + (e.duration || 0), 0);
+    const totalSessions = log.filter(e => e.type === 'session_complete').length;
+    const totalFocusMin = log.filter(e => e.type === 'session_complete')
+      .reduce((a, e) => a + (e.duration || 0), 0);
+
+    const dailyMap = {};
+    log.forEach(e => {
+      if (e.type === 'session_complete') {
+        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0 };
+        dailyMap[e.date].focusMin += (e.duration || 0);
+        dailyMap[e.date].sessions++;
+      }
+    });
+
+    let streak = 0;
+    const dates = Object.keys(dailyMap).sort().reverse();
+    for (let i = 0; i < dates.length; i++) {
+      if ((dailyMap[dates[i]]?.focusMin || 0) < 30) break;
+      if (i > 0) {
+        const gap = (Date.parse(dates[i-1]) - Date.parse(dates[i])) / 86400000;
+        if (gap > 2) break;
+      }
+      streak++;
+    }
+
+    const zoneStats = state.tracking.zoneStats || {};
+    const zones = getZones();
+    const zoneData = zones.map((z, i) => ({
+      ...z, idx: i,
+      ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
+    }));
+
+    return { todayEvents, sessionsToday, skipsToday, focusMinToday,
+      totalSessions, totalFocusMin, dailyMap, streak, zoneData, log };
+  }
+
+  // ─── Zone Config ──────────────────────────────
+  function getZones() { return state.config?.zones || []; }
+  function getZone(idx) { return getZones()[idx] || null; }
+
+  function getBreakDur(zone, cycle) {
+    if (!zone) return 5;
+    return (cycle > 0 && (cycle + 1) % (zone.cyclesBeforeLongBreak || 4) === 0)
+      ? zone.longBreakDuration : zone.breakDuration;
+  }
+
+  function initZoneState(zone, idx) {
+    return {
+      blockIdx: 0, remaining: (zone.focusDuration || 25) * 60,
+      total: (zone.focusDuration || 25) * 60,
+      running: false, completed: false,
+      blockDone: [],
+      cycle: 0, blockType: 'focus',
+      elapsed: 0
+    };
+  }
+
+  function rebuildZoneStates() {
+    state.byZone = {};
+    getZones().forEach((z, i) => { state.byZone[i] = initZoneState(z, i); });
+  }
+
+  function getCurrentZs() { return state.byZone[state.currentZoneIdx]; }
+
+  function cycleTitle(z, i) {
+    return (z.cycleTitles && z.cycleTitles[i]) || `Cycle ${i + 1}`;
+  }
+
+  // ─── Timer Engine ────────────────────────────
+  function stopTimer() { if (state.timerHandle) { clearInterval(state.timerHandle); state.timerHandle = null; } }
+
+  function timerTick() {
+    const zs = getCurrentZs();
+    if (!zs || !zs.running) return;
+    if (zs.remaining <= 0) {
+      stopTimer();
+      zs.running = false;
+      handleBlockComplete();
+      return;
+    }
+    zs.remaining--;
+    zs.elapsed = (zs.elapsed || 0) + 1;
+    const z = getZone(state.currentZoneIdx);
+    if (z && z.timeLimit && (zs.elapsed >= z.timeLimit * 60)) {
+      stopTimer();
+      zs.running = false;
+      toast(`Time limit reached for "${z.title}" — auto-completing`, 'warning');
+      completeZone();
+      return;
+    }
+    if (zs.remaining < 300 && zs.remaining % 60 === 0) chime('tick');
+    saveState();
+    updateTimerDisplay();
+  }
+
+  function timerStart() {
+    if (state.dayComplete) return;
+    const zs = getCurrentZs();
+    if (!zs || zs.completed) return;
+    notifRequest();
+    zs.running = true;
+    logEvent('session_start', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle });
+    stopTimer();
+    state.timerHandle = setInterval(timerTick, 1000);
+    chime('transition');
+    renderControls();
+    renderSidebar();
+    updateTimerDisplay();
+  }
+
+  function timerPause() {
+    const zs = getCurrentZs();
+    if (!zs) return;
+    zs.running = false;
+    logEvent('pause', { zoneIdx: state.currentZoneIdx, remaining: zs.remaining });
+    stopTimer();
+    renderControls();
+    renderSidebar();
+  }
+
+  function timerReset() {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z || !zs) return;
+    if (!confirm(`Reset timer for ${z.title}?`)) return;
+    stopTimer();
+    zs.running = false;
+    const dur = zs.blockType === 'focus' ? (z.focusDuration || 25) * 60 : (getBreakDur(z, zs.cycle) * 60);
+    zs.remaining = dur;
+    zs.total = dur;
+    renderAll();
+    toast('Timer reset', 'info');
+  }
+
+  function timerSkip() {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!zs) return;
+    stopTimer();
+    zs.running = false;
+    const actualMin = zs.blockType === 'focus' ? Math.round((((z?.focusDuration || 25) * 60) - zs.remaining) / 60) : 0;
+    logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+    zs.remaining = 0;
+    if (zs.blockType === 'focus') {
+      if (actualMin >= 1) {
+        state.stats.totalFocusMin += actualMin;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += actualMin;
+        saveState();
+      }
+      zs.blockType = 'break';
+      const bdur = getBreakDur(z, zs.cycle) * 60;
+      zs.remaining = bdur; zs.total = bdur;
+      chime('breakstart');
+      renderAll();
+    } else {
+      chime('transition');
+      zs.cycle++;
+      zs.blockType = 'focus';
+      const maxCycles = z.totalCycles || 4;
+      if (zs.cycle >= maxCycles) { completeZone(); return; }
+      zs.remaining = (z.focusDuration || 25) * 60;
+      zs.total = (z.focusDuration || 25) * 60;
+      renderAll();
+    }
+  }
+
+  function skipZone() {
+    const z = getZone(state.currentZoneIdx);
+    if (!z || !confirm(`Skip "${z.title}" and move to next?`)) return;
+    stopTimer();
+    const zs = getCurrentZs();
+    const zi = state.currentZoneIdx;
+    logEvent('skip_zone', { zoneIdx: zi, zoneName: z.title });
+    if (!state.tracking.zoneStats[zi]) state.tracking.zoneStats[zi] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+    state.tracking.zoneStats[zi].completes++;
+    if (zs) { zs.running = false; zs.completed = true; }
+    const next = zi + 1;
+    if (next >= getZones().length) { finishDay(); return; }
+    state.currentZoneIdx = next;
+    const nz = getZone(next);
+    const nzs = state.byZone[next];
+    if (nzs) { nzs.blockIdx = 0; nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
+    renderAll();
+    toast(`Skipped to ${nz?.title || 'next zone'}`, 'success');
+  }
+
+  function handleBlockComplete(actualMin) {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z || !zs) return;
+    const wasFocus = zs.blockType === 'focus';
+    const fullDur = wasFocus ? (z.focusDuration || 25) : getBreakDur(z, zs.cycle);
+    const dur = actualMin !== undefined ? actualMin : fullDur;
+
+    if (wasFocus) {
+      logEvent('session_complete', { zoneIdx: state.currentZoneIdx, duration: dur, cycle: zs.cycle, skipped: !!actualMin });
+      chime('complete');
+      notifSend('Focus Complete!', 'Great work! Take a break.');
+      toast('Focus complete! Take a break.', 'success');
+      state.stats.totalSessions++;
+      state.stats.totalFocusMin += dur;
+      const key = todayKey();
+      if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+      state.stats.history[key].focusMin += dur;
+      state.stats.history[key].sessions++;
+      saveState();
+
+      zs.blockType = 'break';
+      const bdur = getBreakDur(z, zs.cycle) * 60;
+      zs.remaining = bdur;
+      zs.total = bdur;
+      chime('breakstart');
+      renderAll();
+    } else {
+      chime('transition');
+      notifSend('Break Over!', 'Time to focus again.');
+      toast('Break over! Back to work.', 'info');
+      zs.cycle++;
+      zs.blockType = 'focus';
+      const maxCycles = z.totalCycles || 4;
+      if (zs.cycle >= maxCycles) {
+        completeZone();
+        return;
+      }
+      const dur = (z.focusDuration || 25) * 60;
+      zs.remaining = dur;
+      zs.total = dur;
+      renderAll();
+    }
+  }
+
+  function completeZone() {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    logEvent('zone_complete', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
+    if (z) toast(`Zone ${z.title} complete! 🎉`, 'success');
+    confetti();
+    notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
+    stopTimer();
+    if (zs) { zs.running = false; zs.completed = true; }
+    const next = state.currentZoneIdx + 1;
+    if (next >= getZones().length) { finishDay(); return; }
+    state.currentZoneIdx = next;
+    const nz = getZone(next);
+    const nzs = state.byZone[next];
+    if (nzs) { nzs.blockIdx = 0; nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
+    renderAll();
+  }
+
+  function markZoneComplete(idx) {
+    const z = getZone(idx);
+    const zs = state.byZone[idx];
+    const evData = { zoneIdx: idx, zoneName: z?.title };
+    state.tracking.log.push({ id: uid(), date: todayKey(), time: new Date().toISOString(), type: 'zone_complete', ...evData });
+    if (!state.tracking.zoneStats[idx]) state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+    state.tracking.zoneStats[idx].doneNoTimer++;
+    if (zs) { zs.running = false; zs.completed = true; stopTimer(); }
+    const next = idx + 1;
+    if (next >= getZones().length) { finishDay(); renderAll(); return; }
+    state.currentZoneIdx = next;
+    const nz = getZone(next);
+    const nzs = state.byZone[next];
+    if (nz && nzs) { nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
+    renderAll();
+  }
+
+  function finishDay() {
+    state.dayComplete = true;
+    stopTimer();
+    confetti();
+    notifSend('Day Complete! 🌟', 'All zones finished!');
+    toast('All zones complete! Amazing work! 🌟', 'success', 5000);
+    renderAll();
+  }
+
+  function resetDay() {
+    stopTimer();
+    state.currentZoneIdx = 0;
+    state.dayComplete = false;
+    rebuildZoneStates();
+    renderAll();
+  }
+
+  // ─── SET EXAM TRACK ─────────────────────────
+  async function setExamTrack(trackId) {
+    const track = state.tracks.find(t => t.id === trackId);
+    if (!track) return;
+    const goals = {
+      JEE: { goal: 'JEE Advanced 2026', tag: 'Consistency over intensity' },
+      NEET: { goal: 'NEET UG 2026', tag: 'Master the concepts, ace the exam' },
+      UPSC: { goal: 'UPSC CSE 2026', tag: 'Perseverance, patience, preparation' },
+      GATE: { goal: 'GATE 2027', tag: 'Deep understanding wins' },
+      CA: { goal: 'CA Exams', tag: 'Discipline is the bridge' },
+      BOARDS: { goal: 'Board Exams', tag: 'Excellence is a habit' },
+      CUSTOM: { goal: 'My Goal', tag: 'My pace, my path' }
+    };
+    const info = goals[trackId] || goals.CUSTOM;
+    state.config.identity.examTrack = track.name;
+    state.config.identity.goalName = info.goal;
+    state.config.identity.tagline = info.tag;
+    track.zones.forEach((tz, i) => {
+      if (state.config.zones[i]) {
+        state.config.zones[i].title = tz.title;
+        state.config.zones[i].subtitle = tz.subtitle;
+      }
+    });
+    await apiUpdateConfig(state.config);
+    storage().set('config', state.config);
+    state.onboarded = true;
+    storage().set('onboarded', true);
+    rebuildZoneStates();
+    renderAll();
+  }
+
+  // ─── RENDER ──────────────────────────────────
+  function renderAll() { render(); }
+
+  function render() {
+    if (!state.config) return;
+    if (!state.onboarded) { renderOnboarding(); return; }
+    $root.innerHTML = `
+      <header>
+        <div>
+          <div class="kicker">DAILY DISCIPLINE CONSOLE</div>
+          <h1 style="cursor:pointer" onclick="ZoneApp.editTitleInline()" title="Click to edit title">${esc(state.config?.identity?.goalName || 'Zone')} ✏️</h1>
+        </div>
+        <div class="hdr-right">
+          <button class="icon-btn" onclick="ZoneApp.openOnboarding()">🎯 ${state.examTrack ? 'CHANGE TRACK' : 'SET GOAL'}</button>
+          <div class="hdr-clock">
+            <b class="mono" id="wallclock">--:--:--</b>
+            ${state.config?.identity?.examTrack || 'Ready'}
+          </div>
+        </div>
+      </header>
+
+      <div class="tabs">
+        <button class="tab-btn ${state.tab === 'console' ? 'active' : ''}" onclick="ZoneApp.switchTab('console')">CONSOLE</button>
+        <button class="tab-btn ${state.tab === 'wallpapers' ? 'active' : ''}" onclick="ZoneApp.switchTab('wallpapers')">WALLPAPERS</button>
+        <button class="tab-btn ${state.tab === 'calendar' ? 'active' : ''}" onclick="ZoneApp.switchTab('calendar')">CALENDAR</button>
+        <button class="tab-btn ${state.tab === 'stats' ? 'active' : ''}" onclick="ZoneApp.switchTab('stats')">STATS</button>
+        <button class="tab-btn ${state.tab === 'settings' ? 'active' : ''}" onclick="ZoneApp.switchTab('settings')">SETTINGS</button>
+      </div>
+
+      <div id="tabBody"></div>
+      <footer>ZONE · study execution system · v4</footer>`;
+
+    renderTabBody();
+    tickClock();
+  }
+
+  function switchTab(tab) { state.tab = tab; render(); }
+
+  function renderTabBody() {
+    switch (state.tab) {
+      case 'console': renderConsoleTab(); break;
+      case 'wallpapers': renderWallpaperTab(); break;
+      case 'calendar': renderCalendarTab(); break;
+      case 'stats': renderStatsTab(); break;
+      case 'settings': renderSettingsTab(); break;
+    }
+  }
+
+  function renderOnboarding() {
+    $root.innerHTML = `
+      <header>
+        <div>
+          <div class="kicker">SETUP · ZONE STUDY OS</div>
+          <h1>What are you preparing for?</h1>
+        </div>
+      </header>
+      <div class="track-grid" id="trackGrid"></div>
+      <div class="onboarding-skip">
+        <button onclick="ZoneApp.skipOnboarding()">Skip — use default zones</button>
+      </div>`;
+    const grid = document.getElementById('trackGrid');
+    (state.tracks || []).forEach(t => {
+      const c = document.createElement('button');
+      c.className = 'track-card';
+      c.innerHTML = `<div class="tc-name">${esc(t.name)}</div>
+        <div class="tc-cat">${esc(t.zones?.[0]?.subtitle || '')}</div>
+        ${t.zones ? `<div class="tc-subjects">${t.zones.map(z => z.title).join(' · ')}</div>` : ''}`;
+      c.addEventListener('click', () => setExamTrack(t.id));
+      grid.appendChild(c);
+    });
+  }
+
+  function skipOnboarding() {
+    state.onboarded = true;
+    storage().set('onboarded', true);
+    rebuildZoneStates();
+    render();
+  }
+
+  // ─── CONSOLE TAB ─────────────────────────────
+  function renderConsoleTab() {
+    const body = document.getElementById('tabBody');
+    const zones = getZones();
+    const cur = getZone(state.currentZoneIdx);
+    if (!cur) { body.innerHTML = '<div class="note-bar">No zones configured.</div>'; return; }
+
+    if (state.dayComplete) {
+      const todayEvents = getTodayLog();
+      const focusMin = todayEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+      const sessions = todayEvents.filter(e => e.type === 'session_complete').length;
+      const pauses = todayEvents.filter(e => e.type === 'pause').length;
+      const stops = todayEvents.filter(e => e.type === 'stop').length;
+      const skips = todayEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+
+      const zoneStats = state.tracking.zoneStats || {};
+      const zoneRows = getZones().map((z, i) => {
+        const zs = zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+        let status, icon, cls;
+        if (zs.completes > 0) { status = 'Done'; icon = '🏁'; cls = 'done'; }
+        else if (zs.doneNoTimer > 0) { status = 'Done (manual)'; icon = '✓'; cls = 'manual'; }
+        else { status = 'Skipped'; icon = '⏭'; cls = 'skip'; }
+        return `<div class="dc-zone-row ${cls}" onclick="ZoneApp.resetDay();ZoneApp.selectZone(${i})" title="${status}: ${esc(z.title)}">
+          <div class="dc-zi">${icon}</div>
+          <div class="dc-zb">
+            <div class="dc-zt"><span class="dc-zn">${esc(z.title)}</span><span class="dc-zm">${zs.totalMin || 0}m</span></div>
+            <div class="dc-zs">${zs.sessions || 0} sess · ${zs.skips || 0} skips · ${zs.pauses || 0} pauses</div>
+          </div>
+          <div class="dc-arrow">→</div>
+        </div>`;
+      }).join('');
+
+      const eventIcon = { session_start:'▶', session_complete:'✓', skip_block:'⏭', pause:'⏸', skip_zone:'⏩', zone_complete:'🏁', break:'☕', stop:'⏹' };
+      const eventLbl = { session_start:'Started', session_complete:'Complete', skip_block:'Skip block', pause:'Paused', skip_zone:'Skip zone', zone_complete:'Zone done', break:'Break', stop:'Stopped' };
+      const timeline = todayEvents.slice(-200).reverse().map(e => `
+        <div class="dc-event" onclick="ZoneApp.showDayDetail('${e.id}')" title="${e.type.replace(/_/g,' ')}${e.duration ? ' · '+e.duration+'min' : ''}">
+          <span class="dc-ei" style="background:${e.type === 'session_complete' ? 'var(--accent-lecture)' : e.type === 'pause' || e.type === 'stop' ? 'var(--accent-solve)' : 'var(--bg-3)'}">${eventIcon[e.type] || '•'}</span>
+          <span class="dc-et">${new Date(e.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>
+          <span class="dc-el">${eventLbl[e.type] || e.type}</span>
+          <span class="dc-ez">${e.zoneName || (e.zoneIdx !== undefined ? `Z${e.zoneIdx+1}` : '')}</span>
+          ${e.duration ? `<span class="dc-ed">${e.duration}m</span>` : ''}
+        </div>`).join('');
+
+      body.innerHTML = `
+        <div class="dc-screen">
+          <div class="dc-glow"></div>
+          <div class="dc-hdr">
+            <div class="dc-badge glow">ALL ZONES DONE</div>
+            <div class="dc-icon-wrap">
+              <div class="dc-icon-pulse"></div>
+              <span class="dc-icon">🎯</span>
+            </div>
+            <h2 class="dc-title">MISSION COMPLETE</h2>
+            <p class="dc-sub">${esc(state.config?.identity?.goalName || 'Amazing work')}</p>
+          </div>
+
+          <div class="dc-metrics">
+            <div class="dc-metric" onclick="toast('Focus time today: ${Math.round(focusMin)} minutes','info')">
+              <span class="dc-metric-num" style="color:var(--accent-lecture)">${Math.round(focusMin)}</span>
+              <span class="dc-metric-lbl">FOCUS MIN</span>
+              <span class="dc-metric-sub">Total deep work</span>
+            </div>
+            <div class="dc-metric" onclick="toast('Completed ${sessions} focus sessions today','info')">
+              <span class="dc-metric-num">${sessions}</span>
+              <span class="dc-metric-lbl">SESSIONS</span>
+              <span class="dc-metric-sub">Blocks finished</span>
+            </div>
+            <div class="dc-metric" onclick="toast('Paused ${pauses} times today','info')">
+              <span class="dc-metric-num" style="color:var(--accent-break)">${pauses}</span>
+              <span class="dc-metric-lbl">PAUSES</span>
+              <span class="dc-metric-sub">Breaks taken</span>
+            </div>
+            <div class="dc-metric" onclick="toast('${skips+stops} skips/stops today','info')">
+              <span class="dc-metric-num" style="color:var(--accent-solve)">${skips+stops}</span>
+              <span class="dc-metric-lbl">SKIPS/STOPS</span>
+              <span class="dc-metric-sub">Interruptions</span>
+            </div>
+          </div>
+
+          <div class="dc-section">
+            <div class="dc-section-title" onclick="this.nextElementSibling.classList.toggle('dc-collapse')">ZONE BREAKDOWN <span class="dc-toggle">−</span></div>
+            <div class="dc-breakdown">${zoneRows}</div>
+          </div>
+
+          <div class="dc-section">
+            <div class="dc-section-title" onclick="this.nextElementSibling.classList.toggle('dc-collapse')">TIMELINE <span class="dc-toggle">−</span></div>
+            <div class="dc-timeline">${timeline || '<div class="dc-empty">No events recorded today</div>'}</div>
+          </div>
+
+          <div class="dc-actions">
+            <button class="dc-primary-btn" onclick="ZoneApp.resetDay()">↻ NEW DAY</button>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const zs = getCurrentZs();
+    body.innerHTML = `
+      <div class="console-toolbar">
+        <div class="ct-left">
+          <button class="ct-btn sidebar-toggle" onclick="ZoneApp.toggleSidebar()" title="Toggle sidebar">${state.sidebarOpen ? '☰' : '☰'}</button>
+          <span class="ct-label">ZONE ${String(cur.id).padStart(2,'0')} · ${to12h(cur.startTime)} — ${to12h(cur.endTime)}</span>
+        </div>
+        <div class="ct-actions">
+          <button class="ct-btn fs-toggle" onclick="ZoneApp.toggleFullscreen()" title="Fullscreen">⛶</button>
+          <label class="ct-btn">⬆ Import<input type="file" accept="application/json" style="display:none" onchange="ZoneApp.importConfig(this.files[0])"></label>
+          <button class="ct-btn" onclick="ZoneApp.exportConfig()">⬇ Export</button>
+        </div>
+      </div>
+      <div class="layout ${state.sidebarOpen ? '' : 'sidebar-collapsed'}">
+        <div class="sidebar" id="sidebar"></div>
+        <div class="panel" style="--zc:${cur.color}">
+          <div class="panel-glow"></div>
+          <div class="panel-head">
+            <div>
+              <div class="kicker mono">${to12h(cur.startTime)} — ${to12h(cur.endTime)}</div>
+              <h2>${esc(cur.title)}</h2>
+            </div>
+            <div class="ph-right">
+              <span class="type-badge" style="--badge-c:${zs?.blockType === 'break' ? 'var(--accent-break)' : cur.color}">${esc(zs?.blockType === 'focus' ? 'FOCUS' : 'BREAK')}</span>
+              <div class="cycle-dots" id="cycleDots"></div>
+            </div>
+          </div>
+          <div id="timerArea"></div>
+          <div class="controls" id="controls"></div>
+          <div class="zone-note">${esc(cur.subtitle || '')}</div>
+        </div>
+      </div>
+      <div class="day-progress">
+        <div class="dp-header">
+          <span class="dp-title">DAY PROGRESS</span>
+          <span class="dp-pct mono" id="dpPct">0%</span>
+        </div>
+        <div class="dp-strip" id="dpStrip"></div>
+        <div class="dp-labels" id="dpLabels"></div>
+      </div>`;
+    renderSidebar();
+    renderTimerArea();
+    renderControls();
+    renderDayProgress();
+  }
+
+  function renderSidebar() {
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    sb.innerHTML = getZones().map((z, i) => {
+      const zs = state.byZone[i];
+      const active = i === state.currentZoneIdx;
+      const dotClass = zs?.completed ? 'done' : (zs?.running ? 'live' : '');
+      let pct = 0;
+      if (zs?.completed) pct = 100;
+      else if (zs && z.totalCycles) pct = Math.round((zs.cycle / z.totalCycles) * 100);
+      return `<button class="zone-btn ${active ? 'active' : ''}" style="--zc:${z.color}" onclick="ZoneApp.selectZone(${i})">
+        <div class="zb-bar" style="background:${z.color}"></div>
+        <div class="zb-body">
+          <div class="zb-top">
+            <span class="zb-id">Z${String(z.id).padStart(2,'0')}</span>
+            <span class="zb-type">${esc(z.type || 'FOCUS')}</span>
+            <span class="dot ${dotClass}"></span>
+          </div>
+          <div class="zb-name">${esc(z.title)}</div>
+          <div class="zb-bottom">
+            <span class="zb-time">${to12h(z.startTime)} — ${to12h(z.endTime)}</span>
+            <span class="zb-progress"><i style="width:${pct}%"></i></span>
+          </div>
+        </div>
+      </button>`;
+    }).join('');
+  }
+
+  function selectZone(idx) {
+    state.currentZoneIdx = idx;
+    renderConsoleTab();
+  }
+
+  function ringSVG(fraction, colorVar) {
+    const r = 104, c = 2 * Math.PI * r, size = 260, cx = 130, cy = 130;
+    const offset = c * (1 - fraction);
+    let ticks = '';
+    for (let i = 0; i < 60; i++) {
+      const angle = (i / 60) * 2 * Math.PI;
+      const long = i % 5 === 0;
+      const rOuter = long ? 126 : 122;
+      const rInner = long ? 115 : 120;
+      const x1 = cx + rOuter * Math.cos(angle), y1 = cy + rOuter * Math.sin(angle);
+      const x2 = cx + rInner * Math.cos(angle), y2 = cy + rInner * Math.sin(angle);
+      ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--tick, var(--line))" stroke-width="${long ? 2.5 : 1.5}" stroke-linecap="round"/>`;
+    }
+    return `<svg width="${size}" height="${size}" viewBox="0 0 260 260">
+      <circle cx="${cx}" cy="${cy}" r="96" fill="none" stroke="var(--bg-3)" stroke-width="20"/>
+      <circle cx="${cx}" cy="${cy}" r="96" fill="none" stroke="${colorVar}" stroke-width="20"
+        stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"
+        style="transition:stroke-dashoffset .35s linear"/>
+      ${ticks}
+    </svg>`;
+  }
+
+  function renderTimerArea() {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    const area = document.getElementById('timerArea');
+    if (!area || !z || !zs) return;
+
+    const color = zs.blockType === 'break' ? 'var(--accent-break)' : z.color;
+    const total = zs.total || 1;
+    const frac = zs.completed ? 1 : (total - zs.remaining) / total;
+    const cycles = z.totalCycles || 3;
+
+    const dotsEl = document.getElementById('cycleDots');
+    if (dotsEl) {
+      dotsEl.innerHTML = Array.from({length: cycles}, (_, i) =>
+        `<span class="cdot ${i < zs.cycle ? 'filled' : (i === zs.cycle && zs.blockType === 'focus' ? 'live' : '')}" style="--zc:${z.color}"></span>`
+      ).join('');
+    }
+
+    let tlHTML = '';
+    for (let i = 0; i < cycles; i++) {
+      const isCurFocus = i === zs.cycle && zs.blockType === 'focus' && !zs.completed;
+      const isCurBreak = i === zs.cycle && zs.blockType === 'break' && !zs.completed;
+      const focusDone = i < zs.cycle || (i === zs.cycle && zs.blockType === 'break');
+      const breakDone = i < zs.cycle;
+      const focusPct = isCurFocus ? Math.round((1 - zs.remaining / ((z.focusDuration || 25) * 60)) * 100) : (focusDone ? 100 : 0);
+      const breakDur = getBreakDur(z, i);
+
+      tlHTML += `<div class="tl-group">
+        <div class="tl-block ${isCurFocus ? 'current' : ''} ${focusDone ? 'done' : ''}" style="--zc:${z.color}" onclick="ZoneApp.jumpToCycle(${i})">
+          <div class="tlb-head">
+            <span class="tlb-name">${cycleTitle(z, i)}</span>
+            <span class="tlb-dur">${z.focusDuration || 25}m</span>
+          </div>
+          <div class="tlb-track"><i style="width:${focusPct}%"></i></div>
+          <div class="tlb-status">${focusDone ? '✓' : (isCurFocus ? '▶' : '')}</div>
+        </div>`;
+      if (i < cycles - 1) {
+        tlHTML += `<div class="tl-block tl-break ${isCurBreak ? 'current' : ''} ${breakDone ? 'done' : ''}" onclick="ZoneApp.jumpToCycle(${i+1})">
+          <div class="tlb-head">
+            <span class="tlb-name">Break</span>
+            <span class="tlb-dur">${breakDur}m</span>
+          </div>
+          <div class="tlb-track"><i style="width:${breakDone ? 100 : 0}%"></i></div>
+          <div class="tlb-status">${breakDone ? '✓' : (isCurBreak ? '⏸' : '')}</div>
+        </div>`;
+      }
+      tlHTML += `</div>`;
+    }
+
+    area.innerHTML = `
+      <div class="timer-area">
+        <div class="ring-section">
+          <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
+            ${ringSVG(zs.completed ? 1 : frac, color)}
+            <div class="ring-center">
+              <div class="ring-time mono" style="color:${color}">${zs.completed ? '✓ DONE' : fmtTime(zs.remaining)}</div>
+              <div class="ring-label">${zs.completed ? 'ZONE COMPLETE' : (zs.blockType === 'focus' ? 'FOCUS' : 'BREAK') + ' · ' + cycleTitle(z, zs.cycle)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="tl-section">
+          <div class="tl-header">
+            <span>SEQUENCE</span>
+            <span class="tl-hdr-dur">${z.focusDuration || 25}m focus · ${getBreakDur(z, zs.cycle)}m break</span>
+          </div>
+          <div class="tl-scroll">${tlHTML}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderControls() {
+    const zs = getCurrentZs();
+    const c = document.getElementById('controls');
+    if (!c) return;
+    if (zs?.completed) {
+      c.innerHTML = `
+        <button class="ctl" onclick="ZoneApp.resetZone(${state.currentZoneIdx})"><span class="ctl-icon">↺</span> RESET</button>
+        <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx + 1})"><span class="ctl-icon">⏩</span> SKIP</button>`;
+      return;
+    }
+    c.innerHTML = `
+      <button class="ctl primary big" onclick="ZoneApp.timerToggle()">
+        <span class="ctl-icon">${zs?.running ? '⏸' : '▶'}</span>
+        ${zs?.running ? 'PAUSE' : 'START'}
+        <kbd class="ctl-kbd">SPACE</kbd>
+      </button>
+      <button class="ctl" onclick="ZoneApp.timerSkip()"><span class="ctl-icon">⏭</span> SKIP</button>
+      <button class="ctl" onclick="ZoneApp.timerReset()"><span class="ctl-icon">↺</span> RESET</button>
+      <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx})"><span class="ctl-icon">✓</span> DONE</button>`;
+  }
+
+  function timerToggle() {
+    const zs = getCurrentZs();
+    if (zs?.running) timerPause();
+    else timerStart();
+  }
+
+  function jumpToCycle(cycle) {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z || !zs) return;
+    zs.cycle = cycle;
+    zs.blockType = 'focus';
+    zs.remaining = (z.focusDuration || 25) * 60;
+    zs.total = (z.focusDuration || 25) * 60;
+    if (!zs.running) stopTimer();
+    renderAll();
+  }
+
+  function resetZone(idx) {
+    const z = getZone(idx);
+    const zs = state.byZone[idx];
+    if (!z || !zs) return;
+    if (!confirm(`Reset all progress for "${z.title}"?`)) return;
+    logEvent('stop', { zoneIdx: idx, zoneName: z.title });
+    stopTimer();
+    zs.running = false;
+    zs.completed = false;
+    zs.cycle = 0;
+    zs.blockType = 'focus';
+    zs.remaining = (z.focusDuration || 25) * 60;
+    zs.total = (z.focusDuration || 25) * 60;
+    zs.elapsed = 0;
+    renderAll();
+    toast('Zone reset', 'info');
+  }
+
+  function renderDayProgress() {
+    const strip = document.getElementById('dpStrip');
+    if (!strip) return;
+    const zones = getZones();
+    let totalPct = 0;
+    strip.innerHTML = zones.map((z, i) => {
+      const zs = state.byZone[i];
+      let pct = 0;
+      if (zs?.completed) pct = 100;
+      else if (zs && z.totalCycles) pct = Math.round((zs.cycle / z.totalCycles) * 100);
+      totalPct += pct / zones.length;
+      return `<div class="dp-seg" onclick="ZoneApp.selectZone(${i})" title="${esc(z.title)}"><i style="width:${pct}%;background:${z.color}"></i></div>`;
+    }).join('');
+    const pctEl = document.getElementById('dpPct');
+    if (pctEl) pctEl.textContent = Math.round(totalPct) + '%';
+    const lbl = document.getElementById('dpLabels');
+    if (lbl) lbl.innerHTML = zones.map((z, i) => `<span style="color:${state.currentZoneIdx === i ? z.color : ''}" onclick="ZoneApp.selectZone(${i})">${esc(z.title)}</span>`).join('');
+  }
+
+  function updateTimerDisplay() {
+    const zs = getCurrentZs();
+    if (!zs) return;
+    renderTimerArea();
+    renderControls();
+    renderDayProgress();
+    renderSidebar();
+  }
+
+  function tickClock() {
+    const el = document.getElementById('wallclock');
+    if (el) el.textContent = new Date().toLocaleTimeString();
+  }
+
+  // ─── ONBOARDING MODAL ────────────────────────
+  function openOnboarding() {
+    const presets = [
+      { id: 'JEE', name: 'JEE Main & Advanced', cat: 'ENGINEERING', subs: ['Physics', 'Chemistry', 'Mathematics'] },
+      { id: 'NEET', name: 'NEET UG', cat: 'MEDICAL', subs: ['Physics', 'Chemistry', 'Biology'] },
+      { id: 'UPSC', name: 'UPSC CSE', cat: 'CIVIL SERVICES', subs: ['GS', 'Optional', 'CSAT'] },
+      { id: 'GATE', name: 'GATE', cat: 'ENGINEERING PG', subs: ['Core Subject', 'General Aptitude'] },
+      { id: 'CA', name: 'CA Exams', cat: 'COMMERCE', subs: ['Accounts', 'Law', 'Tax'] },
+      { id: 'BOARDS', name: 'Board Exams', cat: 'SCHOOL', subs: ['Science', 'Maths', 'Languages'] },
+      { id: 'CUSTOM', name: 'Custom Track', cat: 'OTHER', subs: ['Your subjects here'] }
+    ];
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'onboardOv';
+    ov.innerHTML = `
+      <div class="modal">
+        <div class="modal-header"><h3>🎯 What are you preparing for?</h3><button class="close-x" onclick="ZoneApp.closeModal('onboardOv')">✕</button></div>
+        <div class="modal-body">
+          <div class="track-grid">
+            ${presets.map(p => `<button class="track-card" onclick="ZoneApp.selectExamTrack('${p.id}')">
+              <div class="tc-name">${p.name}</div>
+              <div class="tc-cat">${p.cat}</div>
+              <div class="tc-subjects">${p.subs.join(' · ')}</div>
+            </button>`).join('')}
+          </div>
+          <div class="onboarding-skip"><button onclick="ZoneApp.closeModal('onboardOv')">Close</button></div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  }
+
+  function selectExamTrack(id) {
+    closeModal('onboardOv');
+    setExamTrack(id);
+  }
+
+  function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
+
+  // ─── CALENDAR ────────────────────────────────
+  let calMonth = new Date().getMonth();
+  let calYear = new Date().getFullYear();
+
+  function renderCalendarTab() {
+    const body = document.getElementById('tabBody');
+    const now = new Date();
+    const year = calYear, month = calMonth;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    const mName = new Date(year, month).toLocaleString('default', { month: 'long', year: 'numeric' });
+    const labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    let cells = labels.map(d => `<div style="text-align:center;font-size:10px;color:var(--text-muted);padding:4px 0;font-family:var(--mono);letter-spacing:0.5px">${d}</div>`).join('');
+    for (let i = 0; i < firstDay; i++) cells += '<div></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
+      const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const allEvents = getMergedEvents();
+      const dayEvents = allEvents.filter(e => e.date === dateStr);
+      const nEvents = dayEvents.length;
+      cells += `<div class="cal-cell ${isToday ? 'today' : ''}" onclick="ZoneApp.showDayMenu('${dateStr}')" title="${nEvents} event${nEvents !== 1 ? 's' : ''}">
+        <span class="cal-num">${d}</span>
+        ${nEvents > 0 ? `<span class="cal-dot-count">${nEvents > 9 ? '9+' : nEvents}</span>` : ''}
+        ${nEvents > 0 ? `<div class="cal-dots">${dayEvents.slice(0, 3).map(e => `<span style="background:${e.color}"></span>`).join('')}</div>` : ''}
+      </div>`;
+    }
+
+    const todayEvents = getMergedEvents().filter(e => e.date === todayKey());
+
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <h2 style="font-size:20px;font-weight:700">📅 Calendar</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="ctl" onclick="ZoneApp.calToday()" style="padding:6px 14px;font-size:11px">Today</button>
+            <button class="ctl primary" onclick="ZoneApp.showAddEvent()" style="padding:6px 14px;font-size:11px">+ Event</button>
+            <button class="ctl" onclick="ZoneApp.exportEvents()" style="padding:6px 12px;font-size:11px">⬇ Export</button>
+            <label class="ctl" style="padding:6px 12px;font-size:11px;cursor:pointer">⬆ Import<input type="file" accept="application/json" style="display:none" onchange="ZoneApp.importEvents(this.files[0])"></label>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 20px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-mini" onclick="ZoneApp.calPrev()" style="width:30px;height:30px;font-size:14px">◀</button>
+              <span style="font-size:16px;font-weight:600">${mName}</span>
+              <button class="btn-mini" onclick="ZoneApp.calNext()" style="width:30px;height:30px;font-size:14px">▶</button>
+            </div>
+            <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono)">${getMergedEvents().length} events</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${cells}</div>
+        </div>
+
+        <div style="background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <span style="font-weight:600">Today's Events</span>
+            <div style="display:flex;gap:6px">
+              <button class="card-action" onclick="ZoneApp.showAddEvent()" style="font-size:11px;cursor:pointer;background:none;border:none;color:var(--accent-lecture);font-family:var(--mono);letter-spacing:1px">+ ADD</button>
+            </div>
+          </div>
+          <div id="calTodayEvents">
+            ${todayEvents.length === 0
+              ? '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Tap a date on the calendar to add or view events</div>'
+              : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${e.id}')`}">
+                  <div class="cal-event-bar" style="background:${e.color}"></div>
+                  <span class="cal-event-time">${e.start || '──'}${e.end ? '–' + esc(e.end) : ''}</span>
+                  <span class="cal-event-title">${esc(e.title)}${e.note ? ` <span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">(${esc(e.note)})</span>` : ''}</span>
+                  <span class="cal-event-type">${e.type}</span>
+                  ${e.default ? '<span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">DEFAULT</span>'
+                    : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}')" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>`}
+                </div>`).join('')}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function calPrev() { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendarTab(); }
+  function calNext() { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendarTab(); }
+  function calToday() { calMonth = new Date().getMonth(); calYear = new Date().getFullYear(); renderCalendarTab(); }
+
+  function showDayMenu(dateStr) {
+    const dayEvents = getMergedEvents().filter(e => e.date === dateStr);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'dayMenu';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:400px">
+        <div class="modal-header">
+          <h3>📅 ${dateStr}</h3>
+          <button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div class="modal-body" style="gap:10px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="ctl primary" onclick="ZoneApp.closeAndAddEvent('${dateStr}')" style="padding:8px 16px;font-size:12px;flex:1">+ Add Event</button>
+          </div>
+          ${dayEvents.length > 0 ? `
+            <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);letter-spacing:1px">${dayEvents.length} EVENT${dayEvents.length !== 1 ? 'S' : ''}</div>
+            ${dayEvents.map(e => `
+              <div class="cal-event-row ${e.default ? 'cal-default' : ''}" style="cursor:pointer;padding:10px 12px;background:var(--bg-2);border-radius:8px;${e.default ? 'opacity:0.85' : ''}" onclick="${e.default ? '' : `ZoneApp.closeAndEditEvent('${e.id}')`}">
+                <div class="cal-event-bar" style="background:${e.color}"></div>
+                <span class="cal-event-time">${esc(e.start || '──')}${e.end ? '–' + esc(e.end) : ''}</span>
+                <div style="flex:1"><span class="cal-event-title">${esc(e.title)}</span><br><span style="font-size:10px;color:var(--text-muted)">${e.default ? '· Default · ' : ''}${e.type}${e.note ? ' · ' + esc(e.note) : ''}</span></div>
+                ${e.default ? '' : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}');this.closest('.modal-overlay').querySelector('.close-x').click()" style="width:24px;height:24px;font-size:11px">✕</button>`}
+              </div>`).join('')}
+          ` : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;text-align:center">No events on this day</div>'}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  }
+
+  function closeAndAddEvent(date) { closeModal('dayMenu'); showAddEvent(date); }
+  function closeAndEditEvent(id) { closeModal('dayMenu'); showEditEvent(id); }
+
+  // ─── EVENTS CRUD ──────────────────────────────
+  function showAddEvent(prefillDate) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header"><h3>+ Add Event</h3><button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+        <div class="modal-body">
+          <div><span class="field-label">Title</span><input type="text" id="ev-title" placeholder="e.g. Physics coaching" autofocus></div>
+          <div class="field-row">
+            <div><span class="field-label">Date</span><input type="date" id="ev-date" value="${prefillDate || new Date().toISOString().slice(0,10)}"></div>
+            <div><span class="field-label">Start</span><input type="time" id="ev-start" value="${new Date().toTimeString().slice(0,5)}"></div>
+            <div><span class="field-label">End</span><input type="time" id="ev-end" value="${new Date(Date.now() + 3600000).toTimeString().slice(0,5)}"></div>
+          </div>
+          <div><span class="field-label">Type</span>
+            <select id="ev-type">
+              <option value="lecture">Lecture</option><option value="test">Test</option><option value="coaching">Coaching</option>
+              <option value="break">Break</option><option value="meal">Meal</option><option value="personal">Personal</option>
+              <option value="travel">Travel</option><option value="meeting">Meeting</option>
+            </select>
+          </div>
+          <div><span class="field-label">Notes</span><input type="text" id="ev-notes" placeholder="Optional details"></div>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end">
+          <button class="ctl" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="ctl primary" onclick="ZoneApp.saveEvent(this)">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => overlay.querySelector('#ev-title')?.focus(), 100);
+  }
+
+  function saveEvent(btn) {
+    const ov = btn.closest('.modal-overlay');
+    const title = ov.querySelector('#ev-title').value.trim();
+    if (!title) { toast('Please enter a title', 'warning'); return; }
+    const colors = { lecture: '#38BDF8', test: '#F26B6B', coaching: '#FBBF24', break: '#34D399', meal: '#A78BFA', personal: '#F472B6', travel: '#FB923C', meeting: '#A78BFA' };
+    const type = ov.querySelector('#ev-type').value;
+    state.events.push({
+      id: uid(), title, date: ov.querySelector('#ev-date').value,
+      start: ov.querySelector('#ev-start').value, end: ov.querySelector('#ev-end').value,
+      type, color: colors[type] || '#38BDF8',
+      notes: ov.querySelector('#ev-notes')?.value?.trim() || ''
+    });
+    storage().set('events', state.events);
+    ov.remove();
+    toast('Event added!', 'success');
+    renderCalendarTab();
+  }
+
+  function showEditEvent(id) {
+    if (id && id.startsWith('default-')) { toast('Default events cannot be edited', 'info'); return; }
+    const ev = state.events.find(e => e.id === id);
+    if (!ev) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header"><h3>✏ Edit Event</h3><button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+        <div class="modal-body">
+          <div><span class="field-label">Title</span><input type="text" id="ev-edit-title" value="${esc(ev.title)}"></div>
+          <div class="field-row">
+            <div><span class="field-label">Date</span><input type="date" id="ev-edit-date" value="${ev.date}"></div>
+            <div><span class="field-label">Start</span><input type="time" id="ev-edit-start" value="${ev.start}"></div>
+            <div><span class="field-label">End</span><input type="time" id="ev-edit-end" value="${ev.end}"></div>
+          </div>
+          <div><span class="field-label">Type</span>
+            <select id="ev-edit-type">
+              ${['lecture','test','coaching','break','meal','personal','travel','meeting'].map(t =>
+                `<option value="${t}" ${ev.type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div><span class="field-label">Notes</span><input type="text" id="ev-edit-notes" value="${esc(ev.notes || '')}"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <button class="ctl" style="color:var(--danger);border-color:rgba(242,107,107,0.3)" onclick="ZoneApp.deleteEvent('${ev.id}');this.closest('.modal-overlay').remove()">🗑 Delete</button>
+          <div style="display:flex;gap:8px">
+            <button class="ctl" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="ctl primary" onclick="ZoneApp.updateEvent('${ev.id}', this)">Save Changes</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  function updateEvent(id, btn) {
+    const ov = btn.closest('.modal-overlay');
+    const ev = state.events.find(e => e.id === id);
+    if (!ev) return;
+    const title = ov.querySelector('#ev-edit-title').value.trim();
+    if (!title) { toast('Title cannot be empty', 'warning'); return; }
+    const colors = { lecture: '#38BDF8', test: '#F26B6B', coaching: '#FBBF24', break: '#34D399', meal: '#A78BFA', personal: '#F472B6', travel: '#FB923C', meeting: '#A78BFA' };
+    const type = ov.querySelector('#ev-edit-type').value;
+    ev.title = title;
+    ev.date = ov.querySelector('#ev-edit-date').value;
+    ev.start = ov.querySelector('#ev-edit-start').value;
+    ev.end = ov.querySelector('#ev-edit-end').value;
+    ev.type = type;
+    ev.color = colors[type] || '#38BDF8';
+    ev.notes = ov.querySelector('#ev-edit-notes')?.value?.trim() || '';
+    storage().set('events', state.events);
+    ov.remove();
+    toast('Event updated!', 'success');
+    renderCalendarTab();
+  }
+
+  function deleteEvent(id) {
+    if (id && id.startsWith('default-')) { toast('Default events cannot be deleted', 'info'); return; }
+    if (!confirm('Delete this event?')) return;
+    state.events = state.events.filter(e => e.id !== id);
+    storage().set('events', state.events);
+    renderCalendarTab();
+    toast('Event deleted', 'info');
+  }
+
+  function showDayEvents(dateStr) {
+    showDayMenu(dateStr);
+  }
+
+  function exportEvents() {
+    const data = { version: 1, exportedAt: new Date().toISOString(), events: state.events };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `zone-events-${todayKey()}.json`;
+    a.click();
+    toast('Events exported!', 'success');
+  }
+
+  function importEvents(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const events = data.events || data;
+        if (!Array.isArray(events) || events.length === 0) { toast('No events found in file', 'error'); return; }
+        const count = events.filter(e => e.title && e.date).length;
+        if (count === 0) { toast('Invalid event data', 'error'); return; }
+        events.forEach(e => { if (!e.id) e.id = uid(); if (!e.color) e.color = '#38BDF8'; });
+        state.events = [...state.events, ...events];
+        storage().set('events', state.events);
+        renderCalendarTab();
+        toast(`Imported ${count} events!`, 'success');
+      } catch (e) { toast('Invalid JSON file', 'error'); }
+    };
+    reader.readAsText(file);
+  }
+
+  // ─── STATS TAB ──────────────────────────────
+  let chartInstances = {};
+
+  function destroyCharts() {
+    Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch {} });
+    chartInstances = {};
+  }
+
+  function renderStatsTab() {
+    const body = document.getElementById('tabBody');
+    destroyCharts();
+
+    const ts = getTrackingStats();
+    const totalFocus = ts.totalFocusMin;
+    const totalSessions = ts.totalSessions;
+    const sessionsToday = ts.sessionsToday;
+    const skipsToday = ts.skipsToday;
+    const focusToday = ts.focusMinToday;
+    const streak = ts.streak;
+
+    const avgSession = totalSessions > 0 ? Math.round(totalFocus / totalSessions) : 0;
+    const completionRate = sessionsToday + skipsToday > 0
+      ? Math.round((sessionsToday / (sessionsToday + skipsToday)) * 100) : 0;
+
+    const today = todayKey();
+    const todayEvents = ts.todayEvents.slice(-20).reverse();
+
+    // Weekly grid
+    const weeklyData = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const dayData = ts.dailyMap[key];
+      const min = dayData?.focusMin || 0;
+      const isToday = key === today;
+      const cls = isToday ? 'today' : (min === 0 ? '' : (min < 30 ? 'low' : (min < 60 ? 'med' : (min < 120 ? 'high' : 'peak'))));
+      const label = d.toLocaleDateString('en', { weekday: 'short' }).slice(0, 2);
+      weeklyData.push({ key, min, cls, label, isToday });
+    }
+
+    body.innerHTML = `
+      <div class="stats-dash">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <h2 style="font-size:20px;font-weight:700">📊 Analytics Dashboard</h2>
+          <div style="display:flex;gap:8px">
+            <button class="ctl" onclick="ZoneApp.refreshCharts()" style="padding:6px 14px;font-size:11px">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div class="stats-grid-4">
+          <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
+            <div class="num">${sessionsToday}</div>
+            <div class="lbl">TODAY'S SESSIONS</div>
+          </div>
+          <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
+            <div class="num">${focusToday}</div>
+            <div class="lbl">TODAY FOCUS MIN</div>
+          </div>
+          <div class="stat-card-s ${skipsToday > 2 ? 'warn' : ''}">
+            <div class="num">${skipsToday}</div>
+            <div class="lbl">SKIPS TODAY</div>
+          </div>
+          <div class="stat-card-s highlight">
+            <div class="num">${streak}</div>
+            <div class="lbl">DAY STREAK</div>
+          </div>
+        </div>
+
+        <div class="stats-grid-4">
+          <div class="stat-card-s">
+            <div class="num">${totalSessions}</div>
+            <div class="lbl">ALL-TIME SESSIONS</div>
+          </div>
+          <div class="stat-card-s">
+            <div class="num">${(totalFocus / 60).toFixed(1)}h</div>
+            <div class="lbl">TOTAL FOCUS HOURS</div>
+          </div>
+          <div class="stat-card-s">
+            <div class="num">${avgSession}</div>
+            <div class="lbl">AVG SESSION MIN</div>
+          </div>
+          <div class="stat-card-s">
+            <div class="num">${completionRate}%</div>
+            <div class="lbl">COMPLETION RATE</div>
+          </div>
+        </div>
+
+        <div class="chart-panel" id="focusChart">
+          <div class="chart-title">Daily Focus Minutes — Last 14 Days</div>
+          <div class="chart-container"><canvas id="focusLineChart"></canvas></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="chart-panel">
+            <div class="chart-title">Zone Distribution</div>
+            <div class="chart-container tall"><canvas id="zoneDoughnutChart"></canvas></div>
+          </div>
+          <div class="chart-panel">
+            <div class="chart-title">Completion vs Skips (Today)</div>
+            <div class="chart-container"><canvas id="completionChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-title">This Week</div>
+          <div class="weekly-grid">
+            ${weeklyData.map(w => `
+              <div class="weekly-cell ${w.cls}" title="${w.key}: ${w.min}min">
+                <span class="day">${w.label}</span>
+                <span class="val">${w.min}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-title">Zone Breakdown</div>
+          ${ts.zoneData.length > 0 ? `
+          <div class="zone-breakdown">
+            ${ts.zoneData.map(z => {
+              const total = ts.totalSessions || 1;
+              const pct = Math.round((z.sessions / total) * 100);
+              return `<div class="zone-row" onclick="ZoneApp.selectZone(${z.idx})">
+                <div class="z-bar" style="background:${z.color}"></div>
+                <div class="z-info">
+                  <div class="z-name">${esc(z.title)}</div>
+                  <div class="z-stat">${z.sessions} sessions · ${z.totalMin} min · ${z.skips} skips</div>
+                </div>
+                <div class="z-pct" style="color:${z.color}">${pct}%</div>
+              </div>`;
+            }).join('')}
+          </div>` : '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">Complete a session in a zone to see breakdown</div>'}
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-title">Live Activity Log (Today)</div>
+          <div class="event-timeline" id="eventTimeline">
+            ${todayEvents.length === 0
+              ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">Start a timer — every action is logged here in real time</div>'
+              : todayEvents.map(e => {
+                  const iconMap = { session_start: '▶', session_complete: '✓', skip_block: '⏭', pause: '⏸', skip_zone: '⏩', zone_complete: '🏁', break: '☕' };
+                  const icon = iconMap[e.type] || '•';
+                  const clsMap = { session_start: 'start', session_complete: 'complete', skip_block: 'skip', pause: 'pause', skip_zone: 'skip', zone_complete: 'zone', break: 'break' };
+                  const cls = clsMap[e.type] || '';
+                  const labelMap = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', zone_complete: 'Zone complete', break: 'Break started' };
+                  const label = labelMap[e.type] || e.type;
+                  const detail = e.zoneIdx !== undefined ? `Zone ${(e.zoneIdx || 0) + 1}` : '';
+                  return `<div class="event-item">
+                    <span class="event-time">${e.time.slice(11, 16)}</span>
+                    <span class="event-icon ${cls}">${icon}</span>
+                    <span class="event-label">${label}</span>
+                    ${detail ? `<span class="event-detail">${detail}</span>` : ''}
+                  </div>`;
+                }).join('')}
+          </div>
+        </div>
+      </div>`;
+
+    // Initialize charts after DOM is ready
+    setTimeout(() => initCharts(ts), 100);
+  }
+
+  function initCharts(ts) {
+    const isDark = true;
+    const gridColor = 'rgba(255,255,255,0.06)';
+    const textColor = '#6B7686';
+    const accentGreen = '#34D399';
+    const accentBlue = '#38BDF8';
+    const accentRed = '#F26B6B';
+    const accentPurple = '#A78BFA';
+
+    const chartDefaults = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: textColor, font: { family: 'JetBrains Mono', size: 10 } } } },
+      scales: { x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 9 } } }, y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 9 } } } }
+    };
+
+    // Line chart — last 14 days focus minutes
+    const lineCtx = document.getElementById('focusLineChart');
+    if (lineCtx && window.Chart) {
+      const last14 = Object.entries(ts.dailyMap).sort((a, b) => a[0].localeCompare(b[0])).slice(-14);
+      const labels = last14.map(([k]) => k.slice(5));
+      const data = last14.map(([, v]) => v.focusMin || 0);
+      chartInstances.focusLine = new Chart(lineCtx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Focus Minutes',
+            data,
+            borderColor: accentGreen,
+            backgroundColor: accentGreen + '20',
+            fill: true,
+            tension: 0.35,
+            pointBackgroundColor: accentGreen,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          ...chartDefaults,
+          plugins: {
+            ...chartDefaults.plugins,
+            tooltip: {
+              backgroundColor: '#161C26',
+              titleColor: '#EDF1F7',
+              bodyColor: '#A7B0BE',
+              borderColor: '#232B38',
+              borderWidth: 1,
+              cornerRadius: 8
+            }
+          },
+          scales: {
+            x: { ...chartDefaults.scales.x, grid: { display: false } },
+            y: { ...chartDefaults.scales.y, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    // Doughnut — zone distribution
+    const doughnutCtx = document.getElementById('zoneDoughnutChart');
+    if (doughnutCtx && window.Chart) {
+      const zoneData = ts.zoneData.filter(z => z.sessions > 0);
+      if (zoneData.length > 0) {
+        chartInstances.zoneDoughnut = new Chart(doughnutCtx, {
+          type: 'doughnut',
+          data: {
+            labels: zoneData.map(z => z.title),
+            datasets: [{
+              data: zoneData.map(z => z.sessions),
+              backgroundColor: zoneData.map(z => z.color),
+              borderColor: '#10141C',
+              borderWidth: 2,
+              hoverOffset: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: textColor, font: { family: 'JetBrains Mono', size: 10 }, padding: 12 }
+              },
+              tooltip: {
+                backgroundColor: '#161C26',
+                titleColor: '#EDF1F7',
+                bodyColor: '#A7B0BE',
+                borderColor: '#232B38',
+                borderWidth: 1,
+                cornerRadius: 8
+              }
+            },
+            cutout: '65%'
+          }
+        });
+      } else {
+        doughnutCtx.parentElement.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:40px 0;text-align:center">Complete sessions across zones to see distribution</div>';
+      }
+    }
+
+    // Completion rate gauge
+    const compCtx = document.getElementById('completionChart');
+    if (compCtx && window.Chart) {
+      const completed = ts.sessionsToday;
+      const skipped = ts.skipsToday;
+      if (completed + skipped > 0) {
+        chartInstances.completion = new Chart(compCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Completed', 'Skipped'],
+            datasets: [{
+              data: [completed, skipped],
+              backgroundColor: [accentGreen, accentRed],
+              borderColor: '#10141C',
+              borderWidth: 2,
+              hoverOffset: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: textColor, font: { family: 'JetBrains Mono', size: 10 }, padding: 12 }
+              },
+              tooltip: {
+                backgroundColor: '#161C26',
+                titleColor: '#EDF1F7',
+                bodyColor: '#A7B0BE',
+                borderColor: '#232B38',
+                borderWidth: 1,
+                cornerRadius: 8
+              }
+            },
+            cutout: '60%'
+          }
+        });
+      } else {
+        compCtx.parentElement.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:30px 0;text-align:center">Start a timer to see completion rate</div>';
+      }
+    }
+  }
+
+  function scrollToChart(id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function showDayDetail(id) {
+    const e = state.tracking.log.find(ev => ev.id === id);
+    if (!e) return;
+    const m = { session_start:'▶ Started', session_complete:'✓ Completed', skip_block:'⏭ Skipped', pause:'⏸ Paused', skip_zone:'⏩ Skipped zone', zone_complete:'🏁 Zone done', break:'☕ Break', stop:'⏹ Stopped' };
+    const p = [m[e.type] || e.type];
+    if (e.zoneName) p.push('Zone: '+e.zoneName);
+    else if (e.zoneIdx !== undefined) p.push('Zone: '+(e.zoneIdx+1));
+    if (e.duration) p.push(e.duration+'min');
+    if (e.cycle !== undefined) p.push('Cycle '+(e.cycle+1));
+    p.push(new Date(e.time).toLocaleTimeString());
+    toast(p.join(' · '), 'info', 4000);
+  }
+
+  function refreshCharts() { renderStatsTab(); }
+
+  // ─── SETTINGS TAB ───────────────────────────
+  function renderSettingsTab() {
+    const body = document.getElementById('tabBody');
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
+        <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
+        <div class="settings-grid">
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Goal</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="goalNameInput" value="${esc(state.config?.identity?.goalName || '')}" placeholder="e.g. NEET 2026" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:14px;font-weight:600">
+                <button class="ctl primary" onclick="ZoneApp.saveGoalName()" style="padding:8px 14px;font-size:11px">Save</button>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+                <div><div style="font-weight:500;font-size:13px">${state.config?.identity?.examTrack || 'Not set'}</div><div style="font-size:11px;color:var(--text-muted)">Exam track</div></div>
+                <button class="ctl" onclick="ZoneApp.openOnboarding()" style="padding:6px 14px;font-size:11px">Change</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Notifications & Sound</div>
+            ${[
+              { id: 'notifEnabled', label: 'Browser Notifications', desc: 'Get notified when blocks end', val: state.settings.notifEnabled },
+              { id: 'soundEnabled', label: 'Sound Effects', desc: 'Play sounds on timer events', val: state.settings.soundEnabled },
+              { id: 'quietMode', label: 'Quiet Mode', desc: 'Suppress non-critical notifications', val: state.settings.quietMode }
+            ].map(s => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
+              <div><div style="font-weight:500;font-size:13px">${s.label}</div><div style="font-size:11px;color:var(--text-muted)">${s.desc}</div></div>
+              <div style="width:44px;height:24px;border-radius:12px;background:${s.val ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('${s.id}')">
+                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+              </div>
+            </div>`).join('')}
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Calendar</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+              <div><div style="font-weight:500;font-size:13px">Indian Holidays & Festivals</div><div style="font-size:11px;color:var(--text-muted)">Show default Indian calendar events</div></div>
+              <div style="width:44px;height:24px;border-radius:12px;background:${state.settings.showDefaultEvents ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('showDefaultEvents')">
+                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.settings.showDefaultEvents ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+              </div>
+            </div>
+          </div>
+          ${state.isAdmin ? `
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:12px">🔑 Reset Keys for Users</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key to give to users so they can reset their password without the admin env password.</div>
+            <button class="ctl" onclick="ZoneApp.generateResetKey()" style="padding:8px 16px;font-size:11px">🎲 Generate Reset Key</button>
+            <div id="resetKeyDisplay" style="margin-top:10px;display:none">
+              <div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-bottom:4px">Share this key with the user:</div>
+              <div style="background:var(--bg-3);border:1px solid var(--accent-suc);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;color:var(--accent-suc);text-align:center;word-break:break-all" id="resetKeyValue"></div>
+            </div>
+          </div>` : ''}
+          <div class="settings-card" style="grid-column:1/-1">
+            <div class="field-label" style="margin-bottom:14px">Schedule Editor</div>
+            <div id="zoneEditorList">${renderZoneEditors()}</div>
+            <div style="margin-top:14px">
+              <button class="ctl" onclick="ZoneApp.saveZoneEdits()" style="padding:8px 18px;font-size:11px;font-weight:600">💾 Save Schedule</button>
+              <span style="font-size:10px;color:var(--text-muted);margin-left:10px;font-family:var(--mono)">Changes apply after day reset</span>
+            </div>
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Data</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px">
+              <button class="ctl" onclick="ZoneApp.exportConfig()" style="padding:8px 16px;font-size:11px">⬇ Export Config</button>
+              <button class="ctl" onclick="ZoneApp.syncExport()" style="padding:8px 16px;font-size:11px">📦 Full Backup</button>
+              <button class="ctl" onclick="ZoneApp.syncImport()" style="padding:8px 16px;font-size:11px">📥 Restore Backup</button>
+              <button class="ctl" onclick="ZoneApp.clearStats()" style="padding:8px 16px;font-size:11px">🗑 Clear Stats</button>
+              <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
+            </div>
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Cloud Sync</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px">
+              <button class="ctl" onclick="ZoneApp.syncHfUpload()" style="padding:8px 16px;font-size:11px">☁ Upload to HF</button>
+              <button class="ctl" onclick="ZoneApp.syncHfDownload()" style="padding:8px 16px;font-size:11px">☁ Download from HF</button>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:8px;font-family:var(--mono)">Set HF_TOKEN &amp; SYNC_DATASET env vars</div>
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Session</div>
+            <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:8px 16px;font-size:11px">🚪 Logout</button>
+          </div>
+        </div>`;
+  }
+
+  function editTitleInline() {
+    const current = state.config?.identity?.goalName || 'Zone';
+    const v = prompt('Edit title:', current);
+    if (v && v.trim() && v.trim() !== current) {
+      state.config.identity.goalName = v.trim();
+      saveConfig();
+      render();
+    }
+  }
+
+  function saveGoalName() {
+    const inp = document.getElementById('goalNameInput');
+    if (!inp) return;
+    const v = inp.value.trim();
+    if (!v) return;
+    state.config.identity.goalName = v;
+    saveConfig();
+    render();
+  }
+
+  function toggleSetting(key) {
+    state.settings[key] = !state.settings[key];
+    storage().set('settings', state.settings);
+    renderTabBody();
+  }
+
+  function renderZoneEditors() {
+    return getZones().map((z, i) => {
+      const colors = ['#38BDF8','#F26B6B','#FBBF24','#34D399','#A78BFA','#F472B6','#FB923C'];
+      const color = z.color || colors[i % colors.length];
+      const typeLabels = { focus: 'Focus', break: 'Break', buffer: 'Buffer' };
+      const maxLimit = z.type === 'buffer' ? 90 : 300;
+      return `<div class="zone-editor-card" style="border-left:4px solid ${color}">
+        <div class="ze-section">
+          <div class="ze-section-title">Basic Info</div>
+          <div class="ze-row">
+            <div class="ze-field flex-1">
+              <label>Title</label>
+              <input type="text" value="${esc(z.title)}" id="ze-${i}-title" placeholder="e.g. Morning Core">
+            </div>
+            <div class="ze-field" style="max-width:140px">
+              <label>Type</label>
+              <select id="ze-${i}-type" onchange="ZoneApp.onZoneTypeChange(${i})">
+                ${['focus','break','buffer'].map(t => `<option value="${t}" ${z.type === t ? 'selected' : ''}>${typeLabels[t]}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="ze-field">
+            <label>Subtitle (optional)</label>
+            <input type="text" value="${esc(z.subtitle || '')}" id="ze-${i}-sub" placeholder="e.g. Deep work session">
+          </div>
+        </div>
+        <div class="ze-section">
+          <div class="ze-section-title">Duration</div>
+          <div class="ze-row">
+            <div class="ze-field flex-1">
+              <label>Focus <span class="ze-label-val" id="ze-${i}-focus-v">${z.focusDuration || 25} min</span></label>
+              <input type="range" min="5" max="120" value="${z.focusDuration || 25}" id="ze-${i}-focus" oninput="document.getElementById('ze-${i}-focus-v').textContent=this.value+' min';ZoneApp.recalcHint(${i})">
+            </div>
+          </div>
+          <div class="ze-row ze-row-3">
+            <div class="ze-field">
+              <label>Short Break</label>
+              <div style="display:flex;align-items:center;gap:4px"><input type="number" min="1" max="30" value="${z.breakDuration || 5}" id="ze-${i}-break" oninput="ZoneApp.recalcHint(${i})"><span class="ze-unit">min</span></div>
+            </div>
+            <div class="ze-field">
+              <label>Long Break</label>
+              <div style="display:flex;align-items:center;gap:4px"><input type="number" min="1" max="60" value="${z.longBreakDuration || 15}" id="ze-${i}-long" oninput="ZoneApp.recalcHint(${i})"><span class="ze-unit">min</span></div>
+            </div>
+            <div class="ze-field">
+              <label>Long Break Every</label>
+              <div style="display:flex;align-items:center;gap:4px"><input type="number" min="1" max="20" value="${z.cyclesBeforeLongBreak || 4}" id="ze-${i}-lb-cycle" style="width:50px" oninput="ZoneApp.recalcHint(${i})"><span class="ze-unit">cycles</span></div>
+            </div>
+          </div>
+          <div class="ze-row">
+            <div class="ze-field flex-1">
+              <label>Max Time <span class="ze-label-val" id="ze-${i}-tl-v">${z.timeLimit || maxLimit} min</span></label>
+              <input type="range" min="15" max="${maxLimit}" value="${z.timeLimit || maxLimit}" id="ze-${i}-tlim" oninput="document.getElementById('ze-${i}-tl-v').textContent=this.value+' min';ZoneApp.recalcHint(${i})">
+            </div>
+          </div>
+          <div class="ze-hint" id="ze-${i}-hint">Calculated total: <strong style="color:var(--accent-solve)">${calcZoneTotal(z)}</strong> min</div>
+          <div id="ze-${i}-ct-wrap">${renderCycleNames(z, i)}</div>
+        </div>
+        <div class="ze-section">
+          <div class="ze-section-title">Schedule</div>
+          <div class="ze-row ze-row-3">
+            <div class="ze-field">
+              <label>Cycles</label>
+              <div style="display:flex;align-items:center;gap:4px"><input type="number" min="1" max="20" value="${z.totalCycles || 4}" id="ze-${i}-cycles" style="width:60px" oninput="ZoneApp.recalcHint(${i});ZoneApp.syncCycleNames(${i})"><span class="ze-unit">blocks</span></div>
+            </div>
+            <div class="ze-field">
+              <label>Start Time</label>
+              <input type="time" value="${z.startTime || '09:00'}" id="ze-${i}-start">
+            </div>
+            <div class="ze-field">
+              <label>End Time</label>
+              <input type="time" value="${z.endTime || '10:00'}" id="ze-${i}-end">
+            </div>
+          </div>
+        </div>
+        ${i > 0 ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);text-align:right"><button class="zone-remove" onclick="ZoneApp.removeZone(${i})">Remove this zone</button></div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function renderCycleNames(z, i) {
+    const cycles = z.totalCycles || 4;
+    if (cycles <= 1) return '';
+    return `<div style="margin-top:14px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:8px;font-family:var(--mono)">Cycle Names</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${Array.from({length: cycles}, (_, ci) => `<input type="text" value="${esc(z.cycleTitles?.[ci] || '')}" id="ze-${i}-ct-${ci}" placeholder="Cycle ${ci+1}" style="flex:1;min-width:100px;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-weight:500">`).join('')}
+      </div>
+    </div>`;
+  }
+
+  function syncCycleNames(i) {
+    const wrap = document.getElementById(`ze-${i}-ct-wrap`);
+    const cyclesEl = document.getElementById(`ze-${i}-cycles`);
+    if (!wrap || !cyclesEl) return;
+    const n = parseInt(cyclesEl.value) || 4;
+    const existing = [];
+    const allInputs = wrap.querySelectorAll('input');
+    allInputs.forEach(inp => { existing.push(inp.value); });
+    const z = { totalCycles: n, cycleTitles: existing };
+    wrap.innerHTML = renderCycleNames(z, i);
+  }
+
+  function onZoneTypeChange(i) {
+    const typeEl = document.getElementById(`ze-${i}-type`);
+    const tlSlider = document.getElementById(`ze-${i}-tlim`);
+    const tlVal = document.getElementById(`ze-${i}-tl-v`);
+    if (!typeEl || !tlSlider) return;
+    const isBuffer = typeEl.value === 'buffer';
+    const max = isBuffer ? 90 : 300;
+    tlSlider.max = max;
+    if (parseInt(tlSlider.value) > max) {
+      tlSlider.value = max;
+      if (tlVal) tlVal.textContent = max + ' min';
+    }
+  }
+
+  function calcZoneTotal(z) {
+    const focusTotal = (z.focusDuration || 25) * (z.totalCycles || 4);
+    const breaks = (z.totalCycles || 4) - 1;
+    let breakTotal = 0;
+    const longEvery = z.cyclesBeforeLongBreak || 4;
+    for (let b = 0; b < breaks; b++) {
+      breakTotal += ((b + 1) % longEvery === 0) ? (z.longBreakDuration || 15) : (z.breakDuration || 5);
+    }
+    return focusTotal + breakTotal;
+  }
+
+  function recalcHint(i) {
+    const focus = parseInt(document.getElementById(`ze-${i}-focus`)?.value) || 25;
+    const brk = parseInt(document.getElementById(`ze-${i}-break`)?.value) || 5;
+    const lng = parseInt(document.getElementById(`ze-${i}-long`)?.value) || 15;
+    const lbCycle = parseInt(document.getElementById(`ze-${i}-lb-cycle`)?.value) || 4;
+    const cycles = parseInt(document.getElementById(`ze-${i}-cycles`)?.value) || 4;
+    const z = { focusDuration: focus, breakDuration: brk, longBreakDuration: lng, cyclesBeforeLongBreak: lbCycle, totalCycles: cycles };
+    const hint = document.getElementById(`ze-${i}-hint`);
+    const tlEl = document.getElementById(`ze-${i}-tlim`);
+    if (hint) {
+      const total = calcZoneTotal(z);
+      const tl = parseInt(tlEl?.value) || 180;
+      const ok = total === tl;
+      hint.innerHTML = `Calculated total: <strong style="color:${ok ? 'var(--accent-solve)' : 'var(--danger)'}">${total}</strong> min ${ok ? '✓' : '≠ ' + tl + ' min limit'}`;
+    }
+  }
+
+  function saveZoneEdits() {
+    const zones = getZones();
+    zones.forEach((z, i) => {
+      const titleEl = document.getElementById(`ze-${i}-title`);
+      if (titleEl) z.title = titleEl.value.trim() || z.title;
+      const subEl = document.getElementById(`ze-${i}-sub`);
+      if (subEl) z.subtitle = subEl.value.trim();
+      const typeEl = document.getElementById(`ze-${i}-type`);
+      if (typeEl) z.type = typeEl.value;
+      const focusEl = document.getElementById(`ze-${i}-focus`);
+      if (focusEl) z.focusDuration = parseInt(focusEl.value) || 25;
+      const breakEl = document.getElementById(`ze-${i}-break`);
+      if (breakEl) z.breakDuration = parseInt(breakEl.value) || 5;
+      const longEl = document.getElementById(`ze-${i}-long`);
+      if (longEl) z.longBreakDuration = parseInt(longEl.value) || 15;
+      const lbCycleEl = document.getElementById(`ze-${i}-lb-cycle`);
+      if (lbCycleEl) z.cyclesBeforeLongBreak = parseInt(lbCycleEl.value) || 4;
+      const cyclesEl = document.getElementById(`ze-${i}-cycles`);
+      if (cyclesEl) z.totalCycles = parseInt(cyclesEl.value) || 4;
+      const startEl = document.getElementById(`ze-${i}-start`);
+      if (startEl) z.startTime = startEl.value;
+      const endEl = document.getElementById(`ze-${i}-end`);
+      if (endEl) z.endTime = endEl.value;
+      const tlEl = document.getElementById(`ze-${i}-tlim`);
+      if (tlEl) z.timeLimit = parseInt(tlEl.value) || 180;
+      z.cycleTitles = [];
+      for (let ci = 0; ci < (z.totalCycles || 4); ci++) {
+        const ctEl = document.getElementById(`ze-${i}-ct-${ci}`);
+        z.cycleTitles.push(ctEl ? ctEl.value.trim() : '');
+      }
+    });
+
+    let err = false;
+    const badZones = [];
+    zones.forEach((z, i) => {
+      const total = calcZoneTotal(z);
+      if (total !== z.timeLimit) {
+        err = true;
+        badZones.push(z.title || `Zone ${i+1}`);
+        const card = document.querySelectorAll('.zone-editor-card')[i];
+        if (card) {
+          card.style.borderColor = 'var(--danger)';
+          card.style.boxShadow = '0 0 0 1px var(--danger)';
+        }
+      }
+    });
+    if (err) {
+      toast(`⛔ Adjust timing: ${badZones.join(', ')} total ≠ max time limit`, 'error');
+      return;
+    }
+
+    document.querySelectorAll('.zone-editor-card').forEach(card => {
+      card.style.borderColor = '';
+      card.style.boxShadow = '';
+    });
+    state.config.zones = zones;
+    saveConfig();
+    toast('Schedule saved! Reset day to apply changes.', 'success');
+  }
+
+  function removeZone(idx) {
+    const zones = getZones();
+    if (zones.length <= 1) { toast('Cannot remove the only zone', 'warning'); return; }
+    if (!confirm(`Remove "${zones[idx].title}"?`)) return;
+    zones.splice(idx, 1);
+    state.config.zones = zones;
+    storage().set('config', state.config);
+    renderTabBody();
+    toast('Zone removed', 'info');
+  }
+
+  function exportConfig() {
+    const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'zone-config.json'; a.click();
+    toast('Config exported!', 'success');
+  }
+
+  function importConfig(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data.zones || !Array.isArray(data.zones) || data.zones.length === 0) {
+          toast('Invalid config: no zones found', 'error'); return;
+        }
+        state.config = data;
+        (state.config.zones || []).forEach(z => {
+          if (z.timeLimit == null) z.timeLimit = z.type === 'buffer' ? 90 : 180;
+          if (!z.cycleTitles) z.cycleTitles = [];
+        });
+        storage().set('config', state.config);
+        resetDay();
+        renderAll();
+        toast('Schedule imported!', 'success');
+      } catch (e) { toast('Invalid JSON file', 'error'); }
+    };
+    reader.readAsText(file);
+  }
+
+  function clearStats() {
+    if (confirm('Clear all study statistics?')) {
+      state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
+      state.tracking = { log: [], zoneStats: {}, sessionCount: 0 };
+      storage().set('stats', state.stats);
+      storage().set('tracking', state.tracking);
+      renderTabBody();
+      toast('Stats cleared', 'info');
+    }
+  }
+
+  function resetAll() {
+    if (confirm('Reset all data? This cannot be undone.')) {
+      localStorage.clear();
+      location.reload();
+    }
+  }
+
+  function logout() {
+    fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
+    window.location.href = '/login.html';
+  }
+
+  async function generateResetKey() {
+    try {
+      const r = await fetchJSON('/api/admin/generate-reset-key', { method: 'POST' });
+      document.getElementById('resetKeyValue').textContent = r.key;
+      document.getElementById('resetKeyDisplay').style.display = 'block';
+      toast('Reset key generated! Share it with the user.', 'success');
+    } catch { toast('Failed to generate key', 'error'); }
+  }
+
+  async function syncExport() {
+    try {
+      const d = await fetchJSON('/api/sync/export');
+      if (!d) return;
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'zone-backup-' + Date.now() + '.json'; a.click();
+      toast('Backup downloaded!', 'success');
+    } catch (e) { toast('Export failed: ' + e.message, 'error'); }
+  }
+
+  function syncImport() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json';
+    inp.onchange = async () => {
+      const file = inp.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const r = await fetchJSON('/api/sync/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) });
+        if (!r) return;
+        if (r.errors && r.errors.length) toast('Restore with errors: ' + r.errors.join(', '), 'warning');
+        else toast('Backup restored! Reloading…', 'success');
+        setTimeout(() => location.reload(), 1000);
+      } catch (e) { toast('Restore failed: ' + e.message, 'error'); }
+    };
+    inp.click();
+  }
+
+  async function syncHfUpload() {
+    toast('Uploading to HF…', 'info');
+    try {
+      const r = await fetchJSON('/api/sync/hf-upload');
+      if (!r) return;
+      if (r.changes) {
+        const parts = [];
+        if (r.changes.new) parts.push('new: ' + r.changes.new.join(', '));
+        if (r.changes.changed) parts.push('updated: ' + r.changes.changed.join(', '));
+        if (r.changes.deleted) parts.push('deleted: ' + r.changes.deleted.join(', '));
+        toast('Uploaded ✅ ' + parts.join(' | '), 'success');
+      } else {
+        toast(r.message || 'Uploaded to HF ✅', 'success');
+      }
+    } catch (e) { toast('HF upload failed: ' + e.message, 'error'); }
+  }
+
+  async function syncHfDownload() {
+    toast('Downloading from HF…', 'info');
+    try {
+      const r = await fetchJSON('/api/sync/hf-download');
+      if (!r) return;
+      if (r.changes && (r.changes.created?.length || r.changes.updated?.length || r.changes.deleted?.length)) {
+        const parts = [];
+        if (r.changes.created) parts.push('created: ' + r.changes.created.join(', '));
+        if (r.changes.updated) parts.push('updated: ' + r.changes.updated.join(', '));
+        if (r.changes.deleted) parts.push('deleted: ' + r.changes.deleted.join(', '));
+        toast('Restored ✅ ' + parts.join(' | '), 'success');
+      } else {
+        toast(r.message || 'No changes', 'success');
+      }
+      if (r.changes && (r.changes.created?.length || r.changes.updated?.length)) {
+        setTimeout(() => location.reload(), 1000);
+      }
+    } catch (e) { toast('HF download failed: ' + e.message, 'error'); }
+  }
+
+  // ─── WALLPAPER TAB ──────────────────────────
+  const WALLPAPER_STYLES = {
+    mission_control: { label: 'Mission Control', tag: 'PROFESSIONAL', bg: 'linear-gradient(180deg,#0A0E14,#0D131C)', panel: '#131920', line: '#232B36', textP: '#E7ECF2', textM: '#7C8896', radius: 14, borderW: 1.5, glowC: '#4ADE80', kicker: 'DAILY DISCIPLINE CONSOLE', swatch: '#4ADE80' },
+    motivational_hustle: { label: 'Motivational Hustle', tag: 'MOTIVATIONAL', bg: 'radial-gradient(circle at 50% 0%,#2B0A05,#120302)', panel: '#1D0906', line: '#3A140C', textP: '#FFF3EC', textM: '#D89A7E', radius: 8, borderW: 2, glowC: '#FF8A3D', kicker: 'NO ZERO DAYS', swatch: '#FF8A3D' },
+    minimal_editorial: { label: 'Minimal Editorial', tag: 'PROFESSIONAL', bg: '#F5F3EE', panel: '#FFFFFF', line: '#DAD5C9', textP: '#1B1B1B', textM: '#8A8578', radius: 0, borderW: 1, kicker: 'DAILY SCHEDULE', swatch: '#1B1B1B' },
+    neon_cyberpunk: { label: 'Neon Cyberpunk', tag: 'EDGY', bg: '#05060A', panel: '#0B0E16', line: '#1E2440', textP: '#E9F9FF', textM: '#7B8FC9', radius: 4, borderW: 1.5, glowC: '#FF2DAF', kicker: 'SYSTEM: FOCUS.EXE', swatch: '#FF2DAF' },
+    retro_terminal: { label: 'Retro Terminal', tag: 'EDGY', bg: '#020402', panel: '#041006', line: '#0F3D1D', textP: '#33FF66', textM: '#1FA043', radius: 0, borderW: 2, glowC: '#33FF66', kicker: '> SYSTEM READY_', swatch: '#33FF66' },
+    nature_calm: { label: 'Nature Calm', tag: 'CALM', bg: '#EDEAE0', panel: '#F7F5EC', line: '#C9CBB8', textP: '#33402F', textM: '#7C8567', radius: 24, borderW: 1.5, kicker: 'STEADY, NOT RUSHED', swatch: '#4B6B53' },
+    cosmic_space: { label: 'Cosmic Space', tag: 'CALM', bg: 'linear-gradient(180deg,#0B0620,#1A0B3D)', panel: '#150A33', line: '#332065', textP: '#EDE9FE', textM: '#A594D1', radius: 16, borderW: 1.5, glowC: '#C4B5FD', kicker: 'ORBIT ONE DAY AT A TIME', swatch: '#C4B5FD' },
+    journal_notebook: { label: 'Journal Notebook', tag: 'CALM', bg: '#FBF6EC', panel: '#FFFDF7', line: '#E4D9BF', textP: '#2B3A55', textM: '#8A7E63', radius: 6, borderW: 1.2, kicker: "today's plan", swatch: '#E07856' },
+    athletic_bold: { label: 'Athletic Bold', tag: 'MOTIVATIONAL', bg: '#0D0D0D', panel: '#161616', line: '#2B2B2B', textP: '#F5F5F5', textM: '#9A9A9A', radius: 2, borderW: 2.5, glowC: '#E11D2E', kicker: 'TRAIN THE DISCIPLINE', swatch: '#E11D2E' },
+    corporate_dashboard: { label: 'Corporate Dashboard', tag: 'PROFESSIONAL', bg: '#0F1B2D', panel: '#FFFFFF', line: '#D7DEE8', textP: '#1F2937', textM: '#64748B', radius: 12, borderW: 0, kicker: 'PERFORMANCE PLAN', swatch: '#2563EB' }
+  };
+
+  function renderWallpaperTab() {
+    const body = document.getElementById('tabBody');
+    body.innerHTML = `
+      <div class="wp-layout">
+        <div class="wp-preview-wrap">
+          <div class="wp-size-toggle">
+            <button class="wp-size-btn ${state.wpSize === 'mobile' ? 'active' : ''}" onclick="ZoneApp.setWpSize('mobile')">MOBILE</button>
+            <button class="wp-size-btn ${state.wpSize === 'desktop' ? 'active' : ''}" onclick="ZoneApp.setWpSize('desktop')">DESKTOP</button>
+          </div>
+          <div class="wp-canvas-frame"><div id="wpPoster" class="wp-poster"></div></div>
+          <div class="wp-actions">
+            <button class="ctl primary" onclick="ZoneApp.downloadWallpaper()">⬇ DOWNLOAD PNG</button>
+          </div>
+        </div>
+        <div class="wp-style-list" id="wpStyleList"></div>
+      </div>`;
+    renderWpStyleList();
+    buildPoster();
+  }
+
+  function renderWpStyleList() {
+    const list = document.getElementById('wpStyleList');
+    if (!list) return;
+    list.innerHTML = Object.entries(WALLPAPER_STYLES).map(([key, s]) => `
+      <button class="wp-style-btn ${state.wpStyle === key ? 'active' : ''}" onclick="ZoneApp.selectWpStyle('${key}')">
+        <span class="wp-swatch" style="background:${s.swatch}"></span>
+        <span><span class="wp-style-name">${s.label}</span><br><span class="wp-style-tag">${s.tag}</span></span>
+      </button>`).join('');
+  }
+
+  function selectWpStyle(key) { state.wpStyle = key; renderWpStyleList(); buildPoster(); }
+  function setWpSize(size) { state.wpSize = size; renderWallpaperTab(); }
+
+  function toggleSidebar() { state.sidebarOpen = !state.sidebarOpen; renderConsoleTab(); }
+  function toggleFullscreen() {
+    state.fullscreen = !state.fullscreen;
+    document.body.classList.toggle('fs-active', state.fullscreen);
+    if (state.fullscreen) {
+      document.documentElement.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (state.tab !== 'console') return;
+    if (e.code === 'Space' && !state.dayComplete) { e.preventDefault(); timerToggle(); }
+    if (e.code === 'KeyF') { e.preventDefault(); toggleFullscreen(); }
+    if (e.code === 'Escape' && state.fullscreen) { toggleFullscreen(); }
+    if (e.code === 'KeyS') { e.preventDefault(); toggleSidebar(); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); const n = state.currentZoneIdx + 1; if (n < getZones().length) selectZone(n); }
+    if (e.code === 'ArrowLeft') { e.preventDefault(); const p = state.currentZoneIdx - 1; if (p >= 0) selectZone(p); }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && state.fullscreen) { state.fullscreen = false; document.body.classList.remove('fs-active'); }
+  });
+
+  function cardHTML(s, z, desktop) {
+    const accent = s.glowC || z.color;
+    return `<div class="wp-card" style="background:${s.panel};border:${s.borderW}px solid ${s.line};border-radius:${s.radius}px">
+      <div class="wp-card-accent" style="background:${accent}"></div>
+      <div class="wp-card-top">
+        <span class="wp-card-num" style="color:${accent}">${String(z.id).padStart(2,'0')}</span>
+        <span class="wp-card-badge" style="color:${accent};border-color:${accent}">${esc(z.type || 'SOLVE')}</span>
+      </div>
+      <div class="wp-card-name">${esc(z.title)}</div>
+      <div class="wp-card-time" style="color:${s.textM}">${to12h(z.startTime)} — ${to12h(z.endTime)}</div>
+      <div class="wp-card-blocks" style="color:${s.textM}">
+        <span>FOCUS</span><span style="color:${s.textP}">${z.focusDuration || 25}m × ${z.totalCycles || 3}</span>
+      </div>
+    </div>`;
+  }
+
+  function buildPoster() {
+    const s = WALLPAPER_STYLES[state.wpStyle];
+    if (!s) return;
+    const meta = state.config?.identity || {};
+    const zones = getZones();
+    const desktop = state.wpSize === 'desktop';
+    const el = document.getElementById('wpPoster');
+    if (!el) return;
+    el.className = 'wp-poster' + (desktop ? ' desktop' : '');
+    el.style.background = s.bg;
+    el.style.color = s.textP;
+
+    let cardsHTML;
+    if (desktop && zones.length > 0) {
+      const rows = zones.length <= 3 ? [zones.length] : [Math.min(Math.ceil(zones.length/2), 3), zones.length - Math.min(Math.ceil(zones.length/2), 3)];
+      let zi = 0;
+      cardsHTML = rows.map(count => {
+        const rowZones = zones.slice(zi, zi + count);
+        zi += count;
+        return `<div class="wp-row">${rowZones.map(z => cardHTML(s, z, desktop)).join('')}</div>`;
+      }).join('');
+    } else {
+      cardsHTML = zones.map(z => cardHTML(s, z, desktop)).join('');
+    }
+
+    el.innerHTML = `
+      <div style="position:relative;z-index:1">
+        <div class="wp-kicker" style="color:${s.textM}">${esc(s.kicker)}</div>
+        <div class="wp-title">${esc(meta.goalName || 'STUDY PLAN')}</div>
+        <div class="wp-hr" style="background:${s.line}"></div>
+        <div class="wp-sub" style="color:${s.textM}">
+          <span>${zones.length} ZONES</span>
+          <span>${desktop ? 'DESKTOP' : 'MOBILE'}</span>
+        </div>
+      </div>
+      <div class="wp-cards">${cardsHTML}</div>
+      <div class="wp-footer-txt" style="color:${s.textM}">
+        <div>ZONE STUDY OS · ${esc(meta.examTrack || 'FOCUS')}</div>
+      </div>`;
+  }
+
+  function downloadWallpaper() {
+    const el = document.getElementById('wpPoster');
+    if (!window.html2canvas) { toast('html2canvas not loaded', 'error'); return; }
+    const scale = state.wpSize === 'desktop' ? 4 : 3.6;
+    html2canvas(el, { scale, backgroundColor: null }).then(canvas => {
+      canvas.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `zone-${state.wpStyle}-${state.wpSize}.png`;
+        a.click();
+        toast('Wallpaper downloaded!', 'success');
+      });
+    }).catch(() => toast('Could not render wallpaper', 'error'));
+  }
+
+  // ─── INIT ────────────────────────────────────
+  async function init() {
+    $root = document.getElementById('app-root');
+    $toastContainer = document.createElement('div');
+    $toastContainer.className = 'toast-container';
+    document.body.appendChild($toastContainer);
+    $root.innerHTML = '<div class="init-loader"><div class="init-spinner"></div><div class="init-text">Loading Zone OS…</div></div>';
+
+    try {
+      const [cfg, tr, au] = await Promise.all([apiConfig(), apiTracks(), fetchJSON('/api/auth-check')]);
+      if (!cfg || !tr) return;
+      state.config = cfg; state.tracks = tr.tracks;
+      state.isAdmin = au.isAdmin;
+      state.username = au.username;
+
+      const savedCfg = storage().get('config');
+      if (savedCfg) {
+        if (savedCfg.zones) state.config.zones = savedCfg.zones;
+        if (savedCfg.identity) Object.assign(state.config.identity, savedCfg.identity);
+      }
+
+      (state.config.zones || []).forEach(z => {
+        if (z.timeLimit == null) z.timeLimit = z.type === 'buffer' ? 90 : 180;
+        if (!z.cycleTitles) z.cycleTitles = [];
+      });
+    } catch (e) {
+      $root.innerHTML = '<div style="padding:40px;text-align:center"><h2>Failed to load</h2><p>Check that the server is running.</p></div>';
+      return;
+    }
+
+    const savedSettings = storage().get('settings');
+    if (savedSettings) Object.assign(state.settings, savedSettings);
+
+    const savedEvents = storage().get('events');
+    if (savedEvents) state.events = savedEvents;
+
+    const savedStats = storage().get('stats');
+    if (savedStats) Object.assign(state.stats, savedStats);
+
+    const savedTracking = storage().get('tracking');
+    if (savedTracking) state.tracking = savedTracking;
+
+    const savedExam = storage().get('examTrack');
+    if (savedExam) state.examTrack = savedExam;
+
+    // load server-side session as fallback (for when localStorage is cleared)
+    if (!isGuest() && !loadSession()) {
+      try {
+        const serverData = await fetchJSON('/api/user-data');
+        if (serverData && serverData.session) {
+          storage().set('session', serverData.session);
+        }
+      } catch {}
+    }
+
+    const onboarded = storage().get('onboarded');
+    if (onboarded) {
+      state.onboarded = true;
+      const sess = loadSession();
+      if (sess && sess.byZone) {
+        state.byZone = sess.byZone;
+        if (sess.currentZoneIdx != null) state.currentZoneIdx = sess.currentZoneIdx;
+        state.dayComplete = !!sess.dayComplete;
+        const zs = getCurrentZs();
+        if (zs && zs.running) {
+          state.timerHandle = setInterval(timerTick, 1000);
+        }
+      } else {
+        rebuildZoneStates();
+      }
+    }
+
+    render();
+    window.addEventListener('beforeunload', e => {
+      saveState();
+      const zs = getCurrentZs();
+      if (zs && zs.running) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        const ov = document.querySelector('.modal-overlay');
+        if (ov) ov.remove();
+        return;
+      }
+      if (e.key === ' ' && state.tab === 'console') {
+        e.preventDefault();
+        timerToggle();
+      }
+    });
+    setInterval(saveState, 5000);
+    setInterval(tickClock, 1000);
+  }
+
+  return {
+    init, render, renderTabBody,
+    switchTab, selectZone, jumpToCycle,
+    timerToggle, timerStart, timerPause, timerSkip, timerReset,
+    skipZone, markZoneComplete, resetZone, resetDay,
+    openOnboarding, selectExamTrack, closeModal, skipOnboarding,
+    showAddEvent, saveEvent, showDayEvents, deleteEvent,
+    showEditEvent, updateEvent,
+    calPrev, calNext, calToday, showDayMenu,
+    closeAndAddEvent, closeAndEditEvent,
+    exportEvents, importEvents, exportConfig, importConfig,
+    toggleSetting, clearStats, resetAll, logout,
+    syncExport, syncImport, syncHfUpload, syncHfDownload,
+    saveGoalName, editTitleInline, generateResetKey,
+    onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone,
+    selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
+    toggleSidebar, toggleFullscreen,
+    refreshCharts, scrollToChart, showDayDetail,
+    getState: () => state
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', () => ZoneApp.init());

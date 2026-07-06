@@ -1,0 +1,209 @@
+{
+  "meta": {
+    "version": "1.0",
+    "lastModified": "2026-07-06T00:00:00Z"
+  },
+  "identity": {
+    "examTrack": "JEE Main & Advanced",
+    "goalName": "JEE Advanced 2026",
+    "tagline": "Consistency over intensity",
+    "userName": "Aspirant"
+  },
+  "zones": [
+    {
+      "id": 1,
+      "title": "Morning Core",
+      "subtitle": "Physics & Chemistry",
+      "focusDuration": 50,
+      "breakDuration": 10,
+      "longBreakDuration": 20,
+      "cyclesBeforeLongBreak": 4,
+      "totalCycles": 3,
+      "timeLimit": 170,
+      "color": "#7C3AED",
+      "type": "focus",
+      "startTime": "06:00",
+      "endTime": "08:50",
+      "cycleTitles": [
+        "\u269b Physics",
+        "\ud83e\uddea Chemistry",
+        "\ud83d\udcdd Mixed Practice"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Math Practice",
+      "subtitle": "Problem solving",
+      "focusDuration": 45,
+      "breakDuration": 15,
+      "longBreakDuration": 25,
+      "cyclesBeforeLongBreak": 4,
+      "totalCycles": 3,
+      "timeLimit": 165,
+      "color": "#059669",
+      "type": "focus",
+      "startTime": "09:00",
+      "endTime": "11:45",
+      "cycleTitles": [
+        "\ud83d\udd22 Algebra & Calculus",
+        "\ud83d\udcd0 Geometry & Vectors",
+        "\ud83c\udfaf Mixed Problems"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Revision",
+      "subtitle": "Review & consolidate",
+      "focusDuration": 40,
+      "breakDuration": 10,
+      "longBreakDuration": 20,
+      "cyclesBeforeLongBreak": 3,
+      "totalCycles": 2,
+      "timeLimit": 90,
+      "color": "#D97706",
+      "type": "focus",
+      "startTime": "14:00",
+      "endTime": "15:30",
+      "cycleTitles": [
+        "\ud83d\udcd6 Physics Theory",
+        "\ud83d\udcd7 Chemistry Theory"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Mock Test",
+      "subtitle": "Simulated exam",
+      "focusDuration": 40,
+      "breakDuration": 5,
+      "longBreakDuration": 15,
+      "cyclesBeforeLongBreak": 4,
+      "totalCycles": 4,
+      "timeLimit": 175,
+      "color": "#DC2626",
+      "type": "focus",
+      "startTime": "16:00",
+      "endTime": "18:55",
+      "cycleTitles": [
+        "\ud83d\udcdd Section A",
+        "\ud83d\udcdd Section B",
+        "\ud83d\udcdd Section C",
+        "\ud83d\udd0d Review"
+      ]
+    }
+  ],
+  "calendar": {
+    "defaultView": "day",
+    "weekStartsOn": 1,
+    "eventTypes": [
+      {
+        "id": "lecture",
+        "label": "Lecture",
+        "color": "#6366F1"
+      },
+      {
+        "id": "test",
+        "label": "Test",
+        "color": "#EF4444"
+      },
+      {
+        "id": "coaching",
+        "label": "Coaching",
+        "color": "#F59E0B"
+      },
+      {
+        "id": "break",
+        "label": "Break",
+        "color": "#10B981"
+      },
+      {
+        "id": "meal",
+        "label": "Meal",
+        "color": "#8B5CF6"
+      },
+      {
+        "id": "travel",
+        "label": "Travel",
+        "color": "#EC4899"
+      },
+      {
+        "id": "personal",
+        "label": "Personal",
+        "color": "#06B6D4"
+      },
+      {
+        "id": "holiday",
+        "label": "Holiday",
+        "color": "#78716C"
+      },
+      {
+        "id": "custom",
+        "label": "Custom",
+        "color": "#6B7280"
+      }
+    ]
+  },
+  "theme": {
+    "mode": "dark",
+    "primaryColor": "#7C3AED",
+    "backgroundColor": "#0F172A",
+    "surfaceColor": "#1E293B",
+    "textColor": "#F8FAFC",
+    "mutedTextColor": "#94A3B8",
+    "borderColor": "#334155",
+    "fontFamily": "'Inter', system-ui, sans-serif",
+    "borderRadius": 12
+  },
+  "copy": {
+    "appName": "Zone",
+    "appTagline": "Your study execution system",
+    "onboarding": {
+      "welcomeTitle": "What are you preparing for?",
+      "welcomeSubtitle": "Set up your study system in seconds",
+      "ctaStart": "Begin Your Journey",
+      "customTrack": "Custom Track"
+    },
+    "timer": {
+      "start": "Start",
+      "pause": "Pause",
+      "resume": "Resume",
+      "skip": "Skip",
+      "complete": "Complete",
+      "extendBreak": "Extend Break"
+    },
+    "zones": {
+      "zoneComplete": "Zone Complete!",
+      "allComplete": "All zones finished for today!",
+      "recoveryActivated": "Recovery mode activated",
+      "nextZone": "Next Zone"
+    },
+    "calendar": {
+      "today": "Today",
+      "addEvent": "Add Event",
+      "noEvents": "No events scheduled"
+    },
+    "emptyStates": {
+      "noSession": "Start your first study session",
+      "dayComplete": "Great work today!",
+      "noConfig": "Configure your study plan to begin"
+    },
+    "motivational": [
+      "Small steps lead to big results.",
+      "Consistency is what transforms average into excellence.",
+      "Your only competition is yourself.",
+      "One more block. You've got this.",
+      "Progress, not perfection."
+    ]
+  },
+  "notifications": {
+    "enabled": true,
+    "quietMode": false,
+    "reminders": {
+      "focusStart": true,
+      "breakStart": true,
+      "zoneComplete": true,
+      "recoveryActivated": true,
+      "calendarReminder": true,
+      "dailyReminder": true
+    }
+  }
+}

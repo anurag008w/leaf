@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zone — Study OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>" />
+  <style>
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .toast { padding: 12px 20px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--line); box-shadow: var(--shadow-1); animation: fadeInUp 0.3s ease; font-size: 13px; pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: 380px; font-family: 'Space Grotesk', sans-serif; }
+    .toast.success { border-color: var(--accent-solve); }
+    .toast.warning { border-color: var(--accent-break); color: var(--accent-break); }
+    .toast.error { border-color: var(--danger); color: var(--danger); }
+    .confetti-piece { position: fixed; width: 8px; height: 8px; border-radius: 2px; animation: confetti-fall 3s ease-out forwards; z-index: 999; pointer-events: none; }
+    @keyframes confetti-fall { 0% { transform: translateY(-10px) rotate(0deg); opacity: 1; } 100% { transform: translateY(100vh) rotate(720deg); opacity: 0; } }
+    @media (max-width: 600px) {
+      .hdr-right .icon-btn { padding: 8px 10px; font-size: 10px; letter-spacing: 0; }
+      .hdr-clock { font-size: 10px; }
+      .hdr-clock b { font-size: 15px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app-root">Loading zone console…</div>
+  <script src="/js/app.js"></script>
+</body>
+</html>

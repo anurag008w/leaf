@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Zone — Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0b0c0f;--bg-2:#121318;--bg-3:#1a1c24;--text:#e8e9ed;--text-secondary:#9ca0b0;--text-muted:#5c6070;--accent-lecture:#60a5fa;--accent-solve:#f97316;--accent-suc:#34d399;--line:#252833;--mono:'SF Mono','Fira Code','Cascadia Code',monospace}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-wrap{width:100%;max-width:380px;padding:24px}
+.login-box{background:var(--bg-2);border:1px solid var(--line);border-radius:20px;padding:40px 32px;text-align:center}
+.logo{font-size:48px;margin-bottom:6px;display:block}
+h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
+.sub{color:var(--text-muted);font-size:12px;margin-bottom:4px}
+.tab-row{display:flex;gap:0;margin-bottom:20px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.tab-btn{flex:1;padding:10px;background:var(--bg-3);border:none;color:var(--text-muted);font-family:var(--mono);font-size:10px;letter-spacing:1px;cursor:pointer;transition:all .15s}
+.tab-btn.active{background:var(--accent-lecture);color:#fff}
+.tab-btn:not(.active):hover{color:var(--text)}
+.field{text-align:left;margin-bottom:14px}
+.field label{display:block;font-family:var(--mono);font-size:10px;color:var(--text-muted);letter-spacing:1.5px;margin-bottom:6px}
+.field input{width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--text);font-size:14px;outline:none;transition:border-color .15s}
+.field input:focus{border-color:var(--accent-lecture)}
+.btn{width:100%;border:none;border-radius:12px;padding:14px;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:1.5px;cursor:pointer;transition:all .15s;display:block;text-align:center;text-decoration:none}
+.btn-primary{background:var(--accent-lecture);color:#fff;margin-top:4px}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-primary:active{transform:scale(.98)}
+.btn-suc{background:var(--accent-suc);color:#fff;margin-top:4px}
+.btn-suc:hover{opacity:.9;transform:translateY(-1px)}
+.btn-ghost{background:var(--bg-3);color:var(--text-secondary);border:1px solid var(--line);margin-top:0}
+.btn-ghost:hover{background:var(--bg-2);color:var(--text);border-color:var(--text-muted)}
+.error{color:#f87171;font-size:12px;margin-top:10px;min-height:18px}
+.success{color:var(--accent-suc);font-size:12px;margin-top:10px;min-height:18px}
+.loader{display:none;margin:10px auto;width:24px;height:24px;border:2px solid var(--line);border-top-color:var(--accent-lecture);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sep{display:flex;align-items:center;gap:12px;margin:18px 0;color:var(--text-muted);font-size:10px;font-family:var(--mono)}
+.sep::before,.sep::after{content:'';flex:1;height:1px;background:var(--line)}
+.hint{color:var(--text-muted);font-size:10px;margin-top:18px;font-family:var(--mono)}
+.guest-hint{font-size:10px;color:var(--text-muted);margin-top:8px;font-family:var(--mono);opacity:.6}
+.panel{display:block}
+.panel.hide{display:none}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+<div class="login-box">
+<span class="logo">🎯</span>
+<h1>ZONE OS</h1>
+<p class="sub">Study Execution System</p>
+
+<div class="tab-row">
+<button class="tab-btn active" id="tabLogin" onclick="showPanel('login')">LOGIN</button>
+<button class="tab-btn" id="tabSignup" onclick="showPanel('signup')">SIGN UP</button>
+</div>
+
+<div id="panelLogin" class="panel">
+<div class="field">
+<label>USERNAME</label>
+<input type="text" id="loginUser" autocomplete="username" placeholder="Your username" autofocus>
+</div>
+<div class="field">
+<label>PASSWORD</label>
+<input type="password" id="loginPass" autocomplete="current-password" placeholder="Your password">
+</div>
+<button class="btn btn-primary" id="loginBtn">UNLOCK</button>
+<div class="error" id="loginError"></div>
+<div class="loader" id="loginLoader"></div>
+<div style="margin-top:10px;font-size:11px"><a href="#" id="forgotLink" style="color:var(--text-muted);text-decoration:none;font-family:var(--mono)">Forgot password?</a></div>
+<div id="forgotPanel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);text-align:left">
+<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Enter your username and the reset key (ask the admin) or admin password.</div>
+<div class="field">
+<label>USERNAME</label>
+<input type="text" id="resetUser" placeholder="Your username">
+</div>
+<div class="field">
+<label>ADMIN PASSWORD</label>
+<input type="password" id="resetAdminPass" placeholder="Admin password">
+</div>
+<div class="field">
+<label>NEW PASSWORD</label>
+<input type="password" id="resetNewPass" placeholder="Min 3 characters">
+</div>
+<button class="btn btn-primary" id="resetBtn" style="font-size:10px;padding:10px">RESET PASSWORD</button>
+<div class="error" id="resetError"></div>
+<div class="success" id="resetSuccess"></div>
+<div class="loader" id="resetLoader"></div>
+</div>
+</div>
+
+<div id="panelSignup" class="panel hide">
+<div class="field">
+<label>CHOOSE USERNAME</label>
+<input type="text" id="signupUser" autocomplete="username" placeholder="e.g. anurag">
+</div>
+<div class="field">
+<label>CHOOSE PASSWORD</label>
+<input type="password" id="signupPass" autocomplete="new-password" placeholder="Min 3 characters">
+</div>
+<button class="btn btn-suc" id="signupBtn">CREATE ACCOUNT</button>
+<div class="error" id="signupError"></div>
+<div class="success" id="signupSuccess"></div>
+<div class="loader" id="signupLoader"></div>
+</div>
+
+<div class="sep">OR</div>
+
+<button class="btn btn-ghost" id="guestBtn">👤 CONTINUE AS GUEST</button>
+<div class="guest-hint">Data stored in browser only</div>
+
+<div class="hint">ZONE · study execution system</div>
+</div>
+</div>
+<script>
+function showPanel(name){
+  document.getElementById('panelLogin').className='panel'+(name==='login'?'':' hide');
+  document.getElementById('panelSignup').className='panel'+(name==='signup'?'':' hide');
+  document.getElementById('tabLogin').className='tab-btn'+(name==='login'?' active':'');
+  document.getElementById('tabSignup').className='tab-btn'+(name==='signup'?' active':'');
+  document.getElementById('loginError').textContent='';
+  document.getElementById('signupError').textContent='';
+  document.getElementById('signupSuccess').textContent='';
+}
+
+// LOGIN
+document.getElementById('loginBtn').onclick=function(){
+  const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value;
+  if(!u||!p){document.getElementById('loginError').textContent='Enter username and password';return}
+  const err=document.getElementById('loginError'),loader=document.getElementById('loginLoader'),btn=this;
+  err.textContent='';btn.style.display='none';loader.style.display='block';
+  fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
+  .then(r=>{if(!r.ok)throw new Error('Invalid credentials');return r.json()})
+  .then(d=>{localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/'})
+  .catch(e=>{err.textContent=e.message||'Login failed';btn.style.display='';loader.style.display='none'})
+};
+
+// SIGNUP
+document.getElementById('signupBtn').onclick=function(){
+  const u=document.getElementById('signupUser').value.trim(),p=document.getElementById('signupPass').value;
+  if(!u){document.getElementById('signupError').textContent='Enter a username';return}
+  if(u.length<2){document.getElementById('signupError').textContent='Username too short';return}
+  if(!p||p.length<3){document.getElementById('signupError').textContent='Password must be at least 3 characters';return}
+  const err=document.getElementById('signupError'),suc=document.getElementById('signupSuccess'),loader=document.getElementById('signupLoader'),btn=this;
+  err.textContent='';suc.textContent='';btn.style.display='none';loader.style.display='block';
+  fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
+  .then(r=>{if(!r.ok){if(r.status===409)throw new Error('Username taken');throw new Error('Signup failed');}return r.json()})
+  .then(d=>{localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/'})
+  .catch(e=>{err.textContent=e.message||'Signup failed';btn.style.display='';loader.style.display='none'})
+};
+
+// GUEST
+document.getElementById('guestBtn').onclick=function(){
+  const btn=this;btn.disabled=true;btn.textContent='Loading…';
+  fetch('/api/guest-login').then(r=>r.json())
+  .then(d=>{localStorage.setItem('zone_guest','1');localStorage.removeItem('zone_user');window.location.href='/'})
+  .catch(()=>{btn.disabled=false;btn.textContent='👤 CONTINUE AS GUEST'})
+};
+
+// FORGOT PASSWORD
+document.getElementById('forgotLink').onclick=function(e){
+  e.preventDefault();
+  const p=document.getElementById('forgotPanel'),l=document.getElementById('forgotLink');
+  if(p.style.display==='block'){p.style.display='none';l.textContent='Forgot password?';return}
+  p.style.display='block';l.textContent='Cancel';
+  document.getElementById('resetError').textContent='';
+  document.getElementById('resetSuccess').textContent='';
+};
+document.getElementById('resetBtn').onclick=function(){
+  const u=document.getElementById('resetUser').value.trim(),ap=document.getElementById('resetAdminPass').value,np=document.getElementById('resetNewPass').value;
+  const err=document.getElementById('resetError'),suc=document.getElementById('resetSuccess'),loader=document.getElementById('resetLoader'),btn=this;
+  if(!u||!ap||!np){err.textContent='Fill all fields';return}
+  if(np.length<3){err.textContent='New password too short';return}
+  err.textContent='';suc.textContent='';btn.style.display='none';loader.style.display='block';
+  fetch('/api/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,admin_password:ap,new_password:np})})
+  .then(r=>{if(!r.ok)return r.json().then(e=>{throw new Error(e.detail||'Reset failed')});return r.json()})
+  .then(d=>{suc.textContent=d.message;btn.style.display='';loader.style.display='none';document.getElementById('loginUser').value=u;document.getElementById('forgotLink').textContent='Forgot password?';document.getElementById('forgotPanel').style.display='none'})
+  .catch(e=>{err.textContent=e.message||'Reset failed';btn.style.display='';loader.style.display='none'})
+};
+
+// Enter key
+document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()});
+document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()});
+document.getElementById('signupUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('signupBtn').click()});
+document.getElementById('signupPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('signupBtn').click()});
+document.getElementById('resetUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
+document.getElementById('resetAdminPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
+document.getElementById('resetNewPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
+</script>
+</body>
+</html>
