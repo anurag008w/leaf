@@ -5,6 +5,7 @@ import secrets
 import time
 import logging
 import re
+from typing import Any
 from pathlib import Path
 from contextlib import asynccontextmanager
 from collections import defaultdict
@@ -197,7 +198,7 @@ def read_user_data(uname: str) -> dict:
             out[k] = _read_json(p)
     return out
 
-def write_user_data(uname: str, key: str, value: dict) -> None:
+def write_user_data(uname: str, key: str, value: Any) -> None:
     if not uname or key not in USER_DATA_KEYS:
         return
     p = user_dir(uname) / f"{key}.json"
@@ -571,7 +572,7 @@ async def get_user_data(request: Request):
 
 class UserDataBody(BaseModel):
     key: str
-    value: dict
+    value: Any
 
 @app.post("/api/user-data")
 async def save_user_data(body: UserDataBody, request: Request):
