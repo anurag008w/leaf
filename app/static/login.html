@@ -132,7 +132,7 @@ document.getElementById('loginBtn').onclick=function(){
   err.textContent='';btn.style.display='none';loader.style.display='block';
   fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:u,password:p})})
   .then(r=>{if(!r.ok)throw new Error('Invalid credentials');return r.json()})
-  .then(d=>{if(!d.token)throw new Error('Login failed – no token');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/app.html'})
+  .then(d=>{if(!d.token)throw new Error('Login failed – no token');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/'})
   .catch(e=>{err.textContent=e.message||'Login failed';btn.style.display='';loader.style.display='none'})
 };
 
@@ -146,7 +146,7 @@ document.getElementById('signupBtn').onclick=function(){
   err.textContent='';suc.textContent='';btn.style.display='none';loader.style.display='block';
   fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:u,password:p})})
   .then(r=>{if(!r.ok){if(r.status===409)throw new Error('Username taken');throw new Error('Signup failed');}return r.json()})
-  .then(d=>{if(!d.token)throw new Error('Signup failed – no token');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/app.html'})
+  .then(d=>{if(!d.token)throw new Error('Signup failed – no token');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/'})
   .catch(e=>{err.textContent=e.message||'Signup failed';btn.style.display='';loader.style.display='none'})
 };
 
@@ -154,7 +154,7 @@ document.getElementById('signupBtn').onclick=function(){
 document.getElementById('guestBtn').onclick=function(){
   const btn=this;btn.disabled=true;btn.textContent='Loading…';
   fetch('/api/guest-login',{method:'POST',credentials:'same-origin'}).then(r=>r.json())
-  .then(d=>{if(!d.token)throw new Error('Guest login failed');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.setItem('zone_guest','1');localStorage.removeItem('zone_user');window.location.href='/app.html'})
+  .then(d=>{if(!d.token)throw new Error('Guest login failed');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.setItem('zone_guest','1');localStorage.removeItem('zone_user');window.location.href='/'})
   .catch(()=>{btn.disabled=false;btn.textContent='👤 CONTINUE AS GUEST'})
 };
 

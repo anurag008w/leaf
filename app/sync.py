@@ -72,8 +72,12 @@ def _sync_files(root: Path):
     if not root.exists():
         return
     for path in root.rglob("*"):
-        if path.is_file(follow_symlinks=False):
-            yield path
+        if not path.is_file(follow_symlinks=False):
+            continue
+        name = path.name
+        if name in (".gitignore", ".gitattributes", ".gitkeep", ".gitmodules", ".git"):
+            continue
+        yield path
 
 
 def fingerprint(root: Path) -> str:
@@ -140,6 +144,7 @@ def create_snapshot(source: Path) -> Path:
 
 
 def upload(repo_id: str, snapshot_dir: Path):
+    log.info("uploading %d files to %s …", len(list(snapshot_dir.rglob("*"))), repo_id)
     upload_folder(
         folder_path=str(snapshot_dir),
         repo_id=repo_id,
@@ -147,6 +152,7 @@ def upload(repo_id: str, snapshot_dir: Path):
         token=HF_TOKEN,
         commit_message=f"myos sync {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
     )
+    log.info("upload complete")
 
 
 def prune_remote(repo_id: str, snapshot_dir: Path):
@@ -194,6 +200,9 @@ def sync_once(last_fp: str | None = None, last_mm: WorkspaceMarker | None = None
         except Exception as exc:
             log.warning("prune failed: %s", exc)
             _prune_needed = True
+    except Exception as exc:
+        log.error("sync upload FAILED: %s", exc)
+        raise
     finally:
         shutil.rmtree(snap, ignore_errors=True)
     return (current_fp, current_mm)
