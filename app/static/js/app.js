@@ -2427,12 +2427,18 @@ const ZoneApp = (() => {
 
   async function resetAll() {
     if (!confirm('Reset all data? This cannot be undone.')) return;
+    state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
+    state.tracking = { log: [], zoneStats: {}, sessionCount: 0 };
+    state.events = [];
+    state.config = { identity: {}, zones: [] };
+    state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true };
+    state.examTrack = null;
     state.onboarded = false;
-    ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
-        try { localStorage.removeItem(p + k); } catch {}
-      });
-    });
+    state.byZone = {};
+    state.dayComplete = false;
+    state.currentZoneIdx = 0;
+    stopTimer();
+    // Clear server data first
     try {
       await Promise.all([
         fetch('/api/config', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ zones: [], identity: {} }) }),
@@ -2443,6 +2449,13 @@ const ZoneApp = (() => {
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: {} }) }),
       ]);
     } catch {}
+    ['zu:', 'zg:', 'zone:'].forEach(p => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
+        try { localStorage.removeItem(p + k); } catch {}
+      });
+    });
+    // Save empty state to localStorage so beforeunload doesn't restore old data
+    saveState();
     location.reload();
   }
 
