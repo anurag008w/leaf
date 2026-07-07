@@ -22,4 +22,4 @@ USER user
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:7860/health || exit 1
 
-CMD ["sh", "-c", "ZONE_DATA_DIR=/data exec uvicorn app.main:app --host 0.0.0.0 --port 7860"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860", "--forwarded-allow-ips", "*"]
