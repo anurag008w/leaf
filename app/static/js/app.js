@@ -1601,25 +1601,6 @@ const ZoneApp = (() => {
         </div>
 
         <div class="stats-grid-4">
-          <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
-            <div class="num">${sessionsToday}</div>
-            <div class="lbl">TODAY SESSIONS</div>
-          </div>
-          <div class="stat-card-s">
-            <div class="num">${manualToday}</div>
-            <div class="lbl">MANUAL DONE</div>
-          </div>
-          <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
-            <div class="num">${focusToday}</div>
-            <div class="lbl">TODAY FOCUS</div>
-          </div>
-          <div class="stat-card-s ${skipsToday > 2 ? 'warn' : ''}">
-            <div class="num">${skipsToday}</div>
-            <div class="lbl">SKIPS TODAY</div>
-          </div>
-        </div>
-
-        <div class="stats-grid-4">
           <div class="stat-card-s highlight">
             <div class="num">${totalSessions + totalManual}</div>
             <div class="lbl">ALL SESSIONS</div>
