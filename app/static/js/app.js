@@ -571,8 +571,9 @@ const ZoneApp = (() => {
     stopTimer();
     if (zs) { zs.running = false; zs.completed = true; }
     saveState();
+    if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); return; }
     const next = state.currentZoneIdx + 1;
-    if (next >= getZones().length) { finishDay(); return; }
+    if (next >= getZones().length) { renderAll(); return; }
     confetti();
     notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
     state.currentZoneIdx = next;
@@ -593,12 +594,14 @@ const ZoneApp = (() => {
     if (z) state.stats.totalFocusMin += (z.focusDuration || 25);
     saveState();
     if (zs) { zs.running = false; zs.completed = true; stopTimer(); }
+    if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); renderAll(); return; }
     const next = idx + 1;
-    if (next >= getZones().length) { finishDay(); renderAll(); return; }
-    state.currentZoneIdx = next;
-    const nz = getZone(next);
-    const nzs = state.byZone[next];
-    if (nz && nzs) { nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
+    if (next < getZones().length) {
+      state.currentZoneIdx = next;
+      const nz = getZone(next);
+      const nzs = state.byZone[next];
+      if (nz && nzs) { nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
+    }
     renderAll();
   }
 
