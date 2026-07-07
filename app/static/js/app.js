@@ -16,7 +16,7 @@ const ZoneApp = (() => {
     events: [],
     stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
     tracking: { log: [], zoneStats: {}, sessionCount: 0 },
-    settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true },
+    settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker' },
     examTrack: null,
     examDates: [],
     wpStyle: 'mission_control', wpSize: 'mobile',
@@ -2223,6 +2223,23 @@ const ZoneApp = (() => {
             </div>`).join('')}
           </div>
           <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Theme</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+              ${[
+                { id:'hacker', label:'Hacker', icon:'💚', desc:'Matrix green terminal' },
+                { id:'cyber', label:'Cyberpunk', icon:'💜', desc:'Neon purple cyan' },
+                { id:'midnight', label:'Midnight', icon:'💙', desc:'Glass deep blue' },
+                { id:'amber', label:'Amber', icon:'🧡', desc:'Warm amber glow' },
+                { id:'corporate', label:'Corporate', icon:'💼', desc:'Clean blue dark' },
+                { id:'platinum', label:'Platinum', icon:'✨', desc:'Premium gold/silver' }
+              ].map(t => `<button onclick="ZoneApp.setTheme('${t.id}')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
+                <span style="font-size:24px;line-height:1">${t.icon}</span>
+                <span style="font-size:11px;font-weight:600">${t.label}</span>
+                <span style="font-size:9px;color:var(--text-muted);white-space:nowrap">${t.desc}</span>
+              </button>`).join('')}
+            </div>
+          </div>
+          <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Calendar</div>
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
               <div><div style="font-weight:500;font-size:13px">Indian Holidays & Festivals</div><div style="font-size:11px;color:var(--text-muted)">Show default Indian calendar events</div></div>
@@ -2292,6 +2309,249 @@ const ZoneApp = (() => {
     storage().set('settings', state.settings);
     if (!isGuest()) saveUserDataToServer('settings');
     renderTabBody();
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme || 'hacker');
+  }
+
+  function setTheme(theme) {
+    state.settings.theme = theme;
+    storage().set('settings', state.settings);
+    if (!isGuest()) saveUserDataToServer('settings');
+    applyTheme(theme);
+    renderTabBody();
+    initThemeEffects();
+  }
+
+  // ─── THEME AMBIENT EFFECTS ─────────────────────
+  let _themeFxCanvas = null;
+  let _themeFxCtx = null;
+  let _themeFxRaf = null;
+  let _themeFxParticles = [];
+
+  function initThemeEffects() {
+    if (_themeFxRaf) { cancelAnimationFrame(_themeFxRaf); _themeFxRaf = null; }
+    _themeFxParticles = [];
+    const theme = state.settings.theme || 'hacker';
+    if (theme === 'hacker' || theme === 'cyber' || theme === 'midnight' || theme === 'amber') {
+      if (!_themeFxCanvas) {
+        _themeFxCanvas = document.createElement('canvas');
+        _themeFxCanvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.7';
+        document.body.appendChild(_themeFxCanvas);
+      }
+      _themeFxCanvas.style.display = 'block';
+      _themeFxCtx = _themeFxCanvas.getContext('2d');
+      resizeThemeCanvas();
+      window.addEventListener('resize', resizeThemeCanvas);
+      const fx = getThemeFx(theme);
+      if (fx) fx.init();
+      function frame() {
+        if (fx) fx.update();
+        if (fx) fx.draw();
+        _themeFxRaf = requestAnimationFrame(frame);
+      }
+      _themeFxRaf = requestAnimationFrame(frame);
+    } else {
+      if (_themeFxCanvas) _themeFxCanvas.style.display = 'none';
+      if (_themeFxParticles.length) _themeFxParticles = [];
+    }
+  }
+
+  function resizeThemeCanvas() {
+    if (!_themeFxCanvas) return;
+    _themeFxCanvas.width = window.innerWidth;
+    _themeFxCanvas.height = window.innerHeight;
+  }
+
+  function getThemeFx(theme) {
+    const c = _themeFxCtx;
+    const w = () => _themeFxCanvas?.width || 0;
+    const h = () => _themeFxCanvas?.height || 0;
+
+    if (theme === 'hacker') {
+      const cols = [];
+      const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789<>/{}[]|&^%$#@!';
+      return {
+        init() {
+          const n = Math.max(40, Math.floor(w() / 15));
+          for (let i = 0; i < n; i++) {
+            cols.push({
+              x: i * (w() / n) + Math.random() * 10,
+              y: Math.random() * h() * -1,
+              speed: 1.5 + Math.random() * 3,
+              len: 8 + Math.floor(Math.random() * 20),
+            });
+          }
+        },
+        update() {
+          for (const col of cols) {
+            col.y += col.speed;
+            if (col.y - col.len * 14 > h()) {
+              col.y = -col.len * 14;
+              col.x = Math.random() * w();
+              col.speed = 1.5 + Math.random() * 3;
+            }
+          }
+        },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          c.font = '13px "JetBrains Mono", monospace';
+          for (const col of cols) {
+            for (let i = 0; i < col.len; i++) {
+              const y = col.y - i * 14;
+              if (y < 0 || y > h()) continue;
+              const ch = chars[Math.floor(Math.random() * chars.length)];
+              const alpha = 1 - (i / col.len) * 0.85;
+              c.fillStyle = i === 0 ? `rgba(200,255,200,${Math.min(1,alpha+0.3)})`
+                : `rgba(52,211,153,${alpha * 0.7})`;
+              c.fillText(ch, col.x, y);
+            }
+          }
+        }
+      };
+    }
+
+    if (theme === 'cyber') {
+      const particles = [];
+      return {
+        init() {
+          const n = Math.min(80, Math.floor(w() * h() / 12000));
+          for (let i = 0; i < n; i++) {
+            particles.push({
+              x: Math.random() * w(), y: Math.random() * h(),
+              vx: (Math.random() - 0.5) * 0.6,
+              vy: (Math.random() - 0.5) * 0.6,
+              r: 1.5 + Math.random() * 3,
+              hue: Math.random() < 0.5 ? 270 : 190,
+              life: 0.5 + Math.random() * 0.5,
+            });
+          }
+        },
+        update() {
+          for (const p of particles) {
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < 0 || p.x > w()) p.vx *= -1;
+            if (p.y < 0 || p.y > h()) p.vy *= -1;
+            p.life -= 0.002;
+            if (p.life <= 0) {
+              p.x = Math.random() * w(); p.y = Math.random() * h();
+              p.life = 0.5 + Math.random() * 0.5;
+            }
+          }
+        },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          for (const p of particles) {
+            c.beginPath();
+            c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            c.fillStyle = `hsla(${p.hue},80%,60%,${p.life * 0.4})`;
+            c.fill();
+            // connect nearby
+            for (const q of particles) {
+              if (p === q) continue;
+              const dx = p.x - q.x, dy = p.y - q.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 100) {
+                c.beginPath();
+                c.moveTo(p.x, p.y);
+                c.lineTo(q.x, q.y);
+                c.strokeStyle = `hsla(${p.hue},80%,60%,${(1 - dist / 100) * 0.1})`;
+                c.lineWidth = 0.5;
+                c.stroke();
+              }
+            }
+          }
+        }
+      };
+    }
+
+    if (theme === 'midnight') {
+      const stars = [];
+      return {
+        init() {
+          const n = Math.min(100, Math.floor(w() * h() / 10000));
+          for (let i = 0; i < n; i++) {
+            stars.push({
+              x: Math.random() * w(), y: Math.random() * h(),
+              r: 0.5 + Math.random() * 2,
+              phase: Math.random() * Math.PI * 2,
+              speed: 0.3 + Math.random() * 0.7,
+            });
+          }
+        },
+        update() {
+          // stars twinkle via sin in draw
+        },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          const t = Date.now() / 1000;
+          for (const s of stars) {
+            const alpha = 0.2 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+            if (alpha < 0.15) continue;
+            c.beginPath();
+            c.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            c.fillStyle = `rgba(150,200,255,${alpha})`;
+            c.fill();
+            if (s.r > 1.2) {
+              c.beginPath();
+              c.arc(s.x, s.y, s.r * 3, 0, Math.PI * 2);
+              c.fillStyle = `rgba(150,200,255,${alpha * 0.08})`;
+              c.fill();
+            }
+          }
+        }
+      };
+    }
+
+    if (theme === 'amber') {
+      const embers = [];
+      return {
+        init() {
+          const n = Math.min(35, Math.floor(w() / 30));
+          for (let i = 0; i < n; i++) {
+            embers.push({
+              x: Math.random() * w(), y: h() + 20 + Math.random() * 60,
+              vx: (Math.random() - 0.5) * 0.4,
+              vy: -(0.5 + Math.random() * 1.2),
+              r: 2 + Math.random() * 3,
+              opacity: 0.3 + Math.random() * 0.4,
+              drift: Math.random() * 0.3,
+            });
+          }
+        },
+        update() {
+          for (const e of embers) {
+            e.x += e.vx + Math.sin(Date.now() / 1000 * e.drift) * 0.2;
+            e.y += e.vy;
+            e.vy -= 0.003;
+            e.opacity -= 0.002;
+            if (e.opacity <= 0 || e.y < -20) {
+              e.x = Math.random() * w();
+              e.y = h() + 20 + Math.random() * 40;
+              e.vy = -(0.5 + Math.random() * 1.2);
+              e.opacity = 0.3 + Math.random() * 0.4;
+              e.r = 2 + Math.random() * 3;
+            }
+          }
+        },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          for (const e of embers) {
+            const grad = c.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r * 2);
+            grad.addColorStop(0, `rgba(251,191,36,${e.opacity * 0.8})`);
+            grad.addColorStop(0.5, `rgba(251,146,60,${e.opacity * 0.3})`);
+            grad.addColorStop(1, `rgba(251,146,60,0)`);
+            c.beginPath();
+            c.arc(e.x, e.y, e.r * 2, 0, Math.PI * 2);
+            c.fillStyle = grad;
+            c.fill();
+          }
+        }
+      };
+    }
+
+    return null;
   }
 
   async function changePassword() {
@@ -2902,6 +3162,8 @@ const ZoneApp = (() => {
 
     const savedSettings = storage().get('settings');
     if (savedSettings) Object.assign(state.settings, savedSettings);
+    applyTheme(state.settings.theme || 'hacker');
+    initThemeEffects();
 
     const savedEvents = storage().get('events');
     if (savedEvents) state.events = savedEvents;
@@ -2991,7 +3253,8 @@ const ZoneApp = (() => {
     selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
     toggleSidebar, toggleFullscreen,
     refreshCharts, scrollToChart, showDayDetail,
-    openExamDateEditor, saveExamDates
+    openExamDateEditor, saveExamDates,
+    applyTheme, setTheme
   };
 })();
 
