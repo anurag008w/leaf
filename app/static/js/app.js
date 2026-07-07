@@ -576,10 +576,8 @@ const ZoneApp = (() => {
     if (next >= getZones().length) { renderAll(); return; }
     confetti();
     notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
+    if (!state.byZone[next]) state.byZone[next] = initZoneState(getZone(next), next);
     state.currentZoneIdx = next;
-    const nz = getZone(next);
-    const nzs = state.byZone[next];
-    if (nzs) { nzs.blockIdx = 0; nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
     renderAll();
   }
 
@@ -597,10 +595,8 @@ const ZoneApp = (() => {
     if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); renderAll(); return; }
     const next = idx + 1;
     if (next < getZones().length) {
+      if (!state.byZone[next]) state.byZone[next] = initZoneState(getZone(next), next);
       state.currentZoneIdx = next;
-      const nz = getZone(next);
-      const nzs = state.byZone[next];
-      if (nz && nzs) { nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
     }
     renderAll();
   }
