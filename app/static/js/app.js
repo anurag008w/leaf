@@ -1118,15 +1118,42 @@ const ZoneApp = (() => {
     if (!confirm(`Reset all progress for "${z.title}"?`)) return;
     logEvent('stop', { zoneIdx: idx, zoneName: z.title });
     stopTimer();
+
+    // Roll back stats for this zone
+    const today = todayKey();
+    const dur = z.focusDuration || 25;
+    const zoneEvents = state.tracking.log.filter(e => e.zoneIdx === idx && e.date === today);
+    zoneEvents.forEach(e => {
+      if (e.type === 'session_complete') {
+        state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
+        const d = e.duration || dur;
+        state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - d);
+        if (state.stats.history[today]) {
+          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 1) - 1);
+          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || d) - d);
+        }
+      }
+      if (e.type === 'zone_complete') {
+        state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
+        state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - dur);
+      }
+    });
+    state.tracking.log = state.tracking.log.filter(e => !(e.zoneIdx === idx && e.date === today));
+
+    // Reset zone stats
+    state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+
+    // Reset timer state
     zs.running = false;
     zs.completed = false;
     zs.cycle = 0;
     zs.blockType = 'focus';
-    zs.remaining = (z.focusDuration || 25) * 60;
-    zs.total = (z.focusDuration || 25) * 60;
+    zs.remaining = dur * 60;
+    zs.total = dur * 60;
     zs.elapsed = 0;
+    saveState();
     renderAll();
-    toast('Zone reset', 'info');
+    toast('Zone reset — stats rolled back', 'info');
   }
 
   function renderDayProgress() {
@@ -1557,7 +1584,7 @@ const ZoneApp = (() => {
         <div class="stats-grid-4">
           <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${sessionsToday}</div>
-            <div class="lbl">TODAY'S SESSIONS</div>
+            <div class="lbl">TODAY SESSIONS</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${manualToday}</div>
@@ -1565,38 +1592,49 @@ const ZoneApp = (() => {
           </div>
           <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${focusToday}</div>
-            <div class="lbl">TODAY FOCUS MIN</div>
+            <div class="lbl">TODAY FOCUS</div>
           </div>
           <div class="stat-card-s ${skipsToday > 2 ? 'warn' : ''}">
             <div class="num">${skipsToday}</div>
             <div class="lbl">SKIPS TODAY</div>
           </div>
-          <div class="stat-card-s highlight">
-            <div class="num">${streak}</div>
-            <div class="lbl">DAY STREAK</div>
+        </div>
+
+        <div class="stats-grid-4">
+          <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
+            <div class="num">${sessionsToday}</div>
+            <div class="lbl">TODAY SESSIONS</div>
+          </div>
+          <div class="stat-card-s">
+            <div class="num">${manualToday}</div>
+            <div class="lbl">MANUAL DONE</div>
+          </div>
+          <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
+            <div class="num">${focusToday}</div>
+            <div class="lbl">TODAY FOCUS</div>
+          </div>
+          <div class="stat-card-s ${skipsToday > 2 ? 'warn' : ''}">
+            <div class="num">${skipsToday}</div>
+            <div class="lbl">SKIPS TODAY</div>
           </div>
         </div>
 
         <div class="stats-grid-4">
-          <div class="stat-card-s">
-            <div class="num">${totalSessions}</div>
-            <div class="lbl">TIMER SESSIONS</div>
-          </div>
-          <div class="stat-card-s">
-            <div class="num">${totalManual}</div>
-            <div class="lbl">MANUAL DONE</div>
+          <div class="stat-card-s highlight">
+            <div class="num">${totalSessions + totalManual}</div>
+            <div class="lbl">ALL SESSIONS</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${(totalFocus / 60).toFixed(1)}h</div>
-            <div class="lbl">TOTAL FOCUS HOURS</div>
+            <div class="lbl">TOTAL FOCUS</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${avgSession}</div>
-            <div class="lbl">AVG SESSION MIN</div>
+            <div class="lbl">AVG SESSION</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${completionRate}%</div>
-            <div class="lbl">COMPLETION RATE</div>
+            <div class="lbl">COMPLETION</div>
           </div>
         </div>
 
