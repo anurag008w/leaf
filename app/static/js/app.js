@@ -193,6 +193,7 @@ const ZoneApp = (() => {
     saveUserDataToServer('settings');
     if (state.examTrack) saveUserDataToServer('examTrack');
     if (state.examDates?.length) saveUserDataToServer('examDates');
+    saveUserDataToServer('onboarded');
     _lastHttpSave = Date.now();
     _pendingHttpSave = null;
   }
@@ -3215,6 +3216,10 @@ const ZoneApp = (() => {
           if (!storage().get('examDates') && serverData.examDates) {
             storage().set('examDates', serverData.examDates);
             state.examDates = serverData.examDates;
+          }
+          if (serverData.onboarded && !storage().get('onboarded')) {
+            storage().set('onboarded', true);
+            state.onboarded = true;
           }
         }
       } catch {}
