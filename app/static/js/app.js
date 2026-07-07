@@ -489,8 +489,9 @@ const ZoneApp = (() => {
     if (!zs) return;
     stopTimer();
     zs.running = false;
-    const actualMin = zs.blockType === 'focus' ? Math.round((((z?.focusDuration || 25) * 60) - zs.remaining) / 60) : 0;
-    logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+    const wasFocus = zs.blockType === 'focus';
+    const actualMin = wasFocus ? Math.round((((z?.focusDuration || 25) * 60) - zs.remaining) / 60) : 0;
+    if (wasFocus) logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
     zs.remaining = 0;
     if (zs.blockType === 'focus') {
       if (actualMin >= 1) {
@@ -1549,7 +1550,8 @@ const ZoneApp = (() => {
     const focusToday = ts.focusMinToday;
     const streak = ts.streak;
 
-    const avgSession = totalSessions > 0 ? Math.round(totalFocus / totalSessions) : 0;
+    const allSessionsTotal = totalSessions + totalManual;
+    const avgSession = allSessionsTotal > 0 ? Math.round(totalFocus / allSessionsTotal) : 0;
     const allTodaySessions = sessionsToday + manualToday;
     const completionRate = allTodaySessions + skipsToday > 0
       ? Math.round((allTodaySessions / (allTodaySessions + skipsToday)) * 100) : 0;
