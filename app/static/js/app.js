@@ -312,9 +312,13 @@ const ZoneApp = (() => {
     const dailyMap = {};
     log.forEach(e => {
       if (e.type === 'session_complete') {
-        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0 };
+        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0 };
         dailyMap[e.date].focusMin += (e.duration || 0);
         dailyMap[e.date].sessions++;
+      }
+      if (e.type === 'skip_block' || e.type === 'skip_zone') {
+        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0 };
+        dailyMap[e.date].skips++;
       }
     });
 
@@ -1578,6 +1582,43 @@ const ZoneApp = (() => {
                 <span class="day">${w.label}</span>
                 <span class="val">${w.min}</span>
               </div>`).join('')}
+          </div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-title">Daily Progress</div>
+          <div class="daily-table-wrap">
+            <table class="daily-table">
+              <thead><tr>
+                <th>Date</th>
+                <th>Focus</th>
+                <th>Sessions</th>
+                <th>Skips</th>
+                <th>Rate</th>
+              </tr></thead>
+              <tbody>
+                ${Object.entries(ts.dailyMap).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30).map(([date, d]) => {
+                  const total = d.sessions + d.skips;
+                  const rate = total > 0 ? Math.round((d.sessions / total) * 100) + '%' : '—';
+                  const dateObj = new Date(date + 'T00:00:00');
+                  const label = dateObj.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
+                  const isToday = date === todayKey();
+                  const minBar = Math.min(d.focusMin, 200);
+                  return `<tr class="${isToday ? 'today-row' : ''}">
+                    <td class="dt-date">${label}</td>
+                    <td class="dt-focus">
+                      <div class="min-bar-wrap">
+                        <div class="min-bar" style="width:${(minBar / 200) * 100}%"></div>
+                        <span class="min-val">${d.focusMin}m</span>
+                      </div>
+                    </td>
+                    <td class="dt-num">${d.sessions}</td>
+                    <td class="dt-num ${d.skips > 2 ? 'dt-warn' : ''}">${d.skips}</td>
+                    <td class="dt-num">${rate}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
           </div>
         </div>
 

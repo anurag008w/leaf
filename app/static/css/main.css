@@ -760,6 +760,21 @@ input[type=color] { width: 44px; height: 36px; border: 1px solid var(--line); bo
 .weekly-cell.high { background: rgba(52,211,153,0.35); }
 .weekly-cell.peak { background: rgba(52,211,153,0.5); }
 
+/* ─── DAILY PROGRESS TABLE ─── */
+.daily-table-wrap { overflow-x: auto; }
+.daily-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.daily-table th { text-align: left; padding: 8px 10px; font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; color: var(--text-muted); border-bottom: 1px solid var(--line); }
+.daily-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.daily-table tbody tr:hover { background: var(--bg-3); }
+.daily-table .today-row td { border-bottom-color: var(--accent-solve); }
+.dt-date { font-weight: 600; white-space: nowrap; }
+.dt-focus { min-width: 120px; }
+.min-bar-wrap { display: flex; align-items: center; gap: 8px; height: 20px; }
+.min-bar { height: 8px; border-radius: 4px; background: var(--accent-solve); min-width: 4px; transition: width .3s; }
+.min-val { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.dt-num { font-family: var(--mono); font-weight: 600; }
+.dt-warn { color: var(--accent-break); }
+
 /* ─── CALENDAR ─── */
 .cal-cell {
   aspect-ratio: 1;
