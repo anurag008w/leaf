@@ -374,12 +374,6 @@ const ZoneApp = (() => {
     return { todayEvents, sessionsToday, manualToday, skipsToday, focusMinToday,
       totalSessions, totalManual, totalFocusMin, dailyMap, streak, zoneData, log, monthGroups };
   }
-      g.totalSkips += data.skips;
-    });
-
-    return { todayEvents, sessionsToday, skipsToday, focusMinToday,
-      totalSessions, totalFocusMin, dailyMap, streak, zoneData, log, monthGroups };
-  }
 
   // ─── Zone Config ──────────────────────────────
   function getZones() { return state.config?.zones || []; }
