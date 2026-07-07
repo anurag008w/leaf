@@ -72,7 +72,7 @@ def _sync_files(root: Path):
     if not root.exists():
         return
     for path in root.rglob("*"):
-        if not path.is_file(follow_symlinks=False):
+        if not path.is_file():
             continue
         name = path.name
         if name in (".gitignore", ".gitattributes", ".gitkeep", ".gitmodules", ".git"):
