@@ -184,6 +184,12 @@ def read_user_data(uname: str) -> dict:
             out[k] = _read_json(p)
     return out
 
+def write_user_data(uname: str, key: str, value: dict) -> None:
+    if not uname or key not in USER_DATA_KEYS:
+        return
+    p = user_dir(uname) / f"{key}.json"
+    _write_json(p, value)
+
 # ── Pydantic models ────────────────────────────────
 class LoginBody(BaseModel):
     username: str
@@ -369,7 +375,7 @@ async def login(body: LoginBody, request: Request):
         return resp
     raise HTTPException(401, "invalid credentials")
 
-@app.get("/api/guest-login")
+@app.post("/api/guest-login")
 async def guest_login(request: Request):
     check_rate_limit(rate_limit_key(request))
     token = GUEST_PREFIX + secrets.token_hex(16)

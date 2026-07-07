@@ -72,7 +72,7 @@ def _sync_files(root: Path):
     if not root.exists():
         return
     for path in root.rglob("*"):
-        if path.is_file():
+        if path.is_file(follow_symlinks=False):
             yield path
 
 
@@ -115,16 +115,13 @@ def metadata_marker(root: Path) -> WorkspaceMarker:
         file_count += 1
         sz = int(stat.st_size)
         mt = int(stat.st_mtime_ns)
-        ct = int(stat.st_ctime_ns)
         total_size += sz
-        newest_mtime = max(newest_mtime, mt, ct)
+        newest_mtime = max(newest_mtime, mt)
         hasher.update(rel.encode())
         hasher.update(b"\0")
         hasher.update(str(sz).encode())
         hasher.update(b"\0")
         hasher.update(str(mt).encode())
-        hasher.update(b"\0")
-        hasher.update(str(ct).encode())
         hasher.update(b"\0")
     return (file_count, total_size, newest_mtime, hasher.hexdigest())
 

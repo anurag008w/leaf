@@ -153,7 +153,7 @@ document.getElementById('signupBtn').onclick=function(){
 // GUEST
 document.getElementById('guestBtn').onclick=function(){
   const btn=this;btn.disabled=true;btn.textContent='Loading…';
-  fetch('/api/guest-login',{credentials:'same-origin'}).then(r=>r.json())
+  fetch('/api/guest-login',{method:'POST',credentials:'same-origin'}).then(r=>r.json())
   .then(d=>{if(!d.token)throw new Error('Guest login failed');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.setItem('zone_guest','1');localStorage.removeItem('zone_user');window.location.href='/'})
   .catch(()=>{btn.disabled=false;btn.textContent='👤 CONTINUE AS GUEST'})
 };

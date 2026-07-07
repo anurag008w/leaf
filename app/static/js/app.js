@@ -95,7 +95,7 @@ const ZoneApp = (() => {
 
     const apprEvents = approx.map(a => {
       const ev = e(a.m, a.d, a.t, a.c);
-      ev.note = 'Approximate date';
+      ev.notes = 'Approximate date';
       return ev;
     });
 
@@ -239,7 +239,7 @@ const ZoneApp = (() => {
     opts.credentials = 'same-origin';
     const r = await fetch(url, opts);
     if (r.status === 401) { window.location.href = '/login.html'; return null; }
-    if (!r.ok) throw new Error('API error: ' + r.status);
+    if (!r.ok) { const b = await r.json().catch(()=>{}); throw new Error(b?.detail || 'API error: ' + r.status); }
     return r.json();
   }
   const apiConfig = () => fetchJSON('/api/config');
@@ -1267,7 +1267,7 @@ const ZoneApp = (() => {
               : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${e.id}')`}">
                   <div class="cal-event-bar" style="background:${e.color}"></div>
                   <span class="cal-event-time">${e.start || '──'}${e.end ? '–' + esc(e.end) : ''}</span>
-                  <span class="cal-event-title">${esc(e.title)}${e.note ? ` <span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">(${esc(e.note)})</span>` : ''}</span>
+                  <span class="cal-event-title">${esc(e.title)}${e.notes ? ` <span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">(${esc(e.notes)})</span>` : ''}</span>
                   <span class="cal-event-type">${e.type}</span>
                   ${e.default ? '<span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">DEFAULT</span>'
                     : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}')" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>`}
@@ -1302,7 +1302,7 @@ const ZoneApp = (() => {
               <div class="cal-event-row ${e.default ? 'cal-default' : ''}" style="cursor:pointer;padding:10px 12px;background:var(--bg-2);border-radius:8px;${e.default ? 'opacity:0.85' : ''}" onclick="${e.default ? '' : `ZoneApp.closeAndEditEvent('${e.id}')`}">
                 <div class="cal-event-bar" style="background:${e.color}"></div>
                 <span class="cal-event-time">${esc(e.start || '──')}${e.end ? '–' + esc(e.end) : ''}</span>
-                <div style="flex:1"><span class="cal-event-title">${esc(e.title)}</span><br><span style="font-size:10px;color:var(--text-muted)">${e.default ? '· Default · ' : ''}${e.type}${e.note ? ' · ' + esc(e.note) : ''}</span></div>
+                <div style="flex:1"><span class="cal-event-title">${esc(e.title)}</span><br><span style="font-size:10px;color:var(--text-muted)">${e.default ? '· Default · ' : ''}${e.type}${e.notes ? ' · ' + esc(e.notes) : ''}</span></div>
                 ${e.default ? '' : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}');this.closest('.modal-overlay').querySelector('.close-x').click()" style="width:24px;height:24px;font-size:11px">✕</button>`}
               </div>`).join('')}
           ` : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;text-align:center">No events on this day</div>'}
