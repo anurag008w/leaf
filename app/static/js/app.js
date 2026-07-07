@@ -2048,8 +2048,8 @@ const ZoneApp = (() => {
 
     body.innerHTML = `
       <div class="exam-timer-wrap">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px">
-          <h2 style="font-size:20px;font-weight:700">⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
+        <div class="exam-timer-header">
+          <h2>⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
           <button class="ctl" onclick="ZoneApp.openExamDateEditor()" style="padding:6px 14px;font-size:11px">✏️ Edit Dates</button>
         </div>
         <div class="exam-grid" id="examGrid">
@@ -2082,9 +2082,9 @@ const ZoneApp = (() => {
             </div>`;
           }).join('')}
         </div>
-        <div style="margin-top:20px;font-size:11px;color:var(--text-muted);text-align:center">
-          ${state.examTrack ? 'Dates auto-configured for ' + esc(state.examTrack) + '. Click "Edit Dates" to customize.' : 'Select an exam track in Settings to see countdown.'}
-        </div>
+      <div class="exam-footer-note">
+        ${state.examTrack ? 'Dates auto-configured for ' + esc(state.examTrack) + '. Click "Edit Dates" to customize.' : 'Select an exam track in Settings to see countdown.'}
+      </div>
       </div>`;
     tickExamTimers();
   }
