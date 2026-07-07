@@ -1328,8 +1328,9 @@ const ZoneApp = (() => {
     const firstDay = new Date(year, month, 1).getDay();
     const mName = new Date(year, month).toLocaleString('default', { month: 'long', year: 'numeric' });
     const labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const totalEvents = getMergedEvents().length;
 
-    let cells = labels.map(d => `<div style="text-align:center;font-size:10px;color:var(--text-muted);padding:4px 0;font-family:var(--mono);letter-spacing:0.5px">${d}</div>`).join('');
+    let cells = labels.map(d => `<div class="cal-day-label">${d}</div>`).join('');
     for (let i = 0; i < firstDay; i++) cells += '<div></div>';
     for (let d = 1; d <= daysInMonth; d++) {
       const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
@@ -1347,10 +1348,10 @@ const ZoneApp = (() => {
     const todayEvents = getMergedEvents().filter(e => e.date === todayKey());
 
     body.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-          <h2 style="font-size:20px;font-weight:700">📅 Calendar</h2>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <div class="cal-wrap" style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">
+        <div class="cal-header">
+          <h2>📅 Calendar</h2>
+          <div class="cal-actions">
             <button class="ctl" onclick="ZoneApp.calToday()" style="padding:6px 14px;font-size:11px">Today</button>
             <button class="ctl primary" onclick="ZoneApp.showAddEvent()" style="padding:6px 14px;font-size:11px">+ Event</button>
             <button class="ctl" onclick="ZoneApp.exportEvents()" style="padding:6px 12px;font-size:11px">⬇ Export</button>
@@ -1358,28 +1359,26 @@ const ZoneApp = (() => {
           </div>
         </div>
 
-        <div style="background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 20px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn-mini" onclick="ZoneApp.calPrev()" style="width:30px;height:30px;font-size:14px">◀</button>
-              <span style="font-size:16px;font-weight:600">${mName}</span>
-              <button class="btn-mini" onclick="ZoneApp.calNext()" style="width:30px;height:30px;font-size:14px">▶</button>
+        <div class="cal-panel">
+          <div class="cal-nav">
+            <div class="cal-nav-left">
+              <button class="cal-nav-btn" onclick="ZoneApp.calPrev()">◀</button>
+              <span class="cal-month-label">${mName}</span>
+              <button class="cal-nav-btn" onclick="ZoneApp.calNext()">▶</button>
             </div>
-            <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono)">${getMergedEvents().length} events</span>
+            <div class="cal-nav-right">${totalEvents} event${totalEvents !== 1 ? 's' : ''}</div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${cells}</div>
+          <div class="cal-grid">${cells}</div>
         </div>
 
-        <div style="background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <span style="font-weight:600">Today's Events</span>
-            <div style="display:flex;gap:6px">
-              <button class="card-action" onclick="ZoneApp.showAddEvent()" style="font-size:11px;cursor:pointer;background:none;border:none;color:var(--accent-lecture);font-family:var(--mono);letter-spacing:1px">+ ADD</button>
-            </div>
+        <div class="cal-events-panel">
+          <div class="cal-events-header">
+            <span>Today's Events</span>
+            <button class="cal-add-btn" onclick="ZoneApp.showAddEvent()">+ ADD</button>
           </div>
           <div id="calTodayEvents">
             ${todayEvents.length === 0
-              ? '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Tap a date on the calendar to add or view events</div>'
+              ? '<div class="cal-empty">Tap a date on the calendar to add or view events</div>'
               : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${e.id}')`}">
                   <div class="cal-event-bar" style="background:${e.color}"></div>
                   <span class="cal-event-time">${e.start || '──'}${e.end ? '–' + esc(e.end) : ''}</span>
