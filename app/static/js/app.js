@@ -1886,12 +1886,6 @@ const ZoneApp = (() => {
             <div class="field-label" style="margin-bottom:14px">Session</div>
             <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:8px 16px;font-size:11px">🚪 Logout</button>
           </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Hub</div>
-            <div style="display:flex;gap:10px">
-              <button class="ctl" onclick="ZoneApp.openHub()" style="padding:8px 16px;font-size:11px">🌐 Open Hugging Face</button>
-            </div>
-          </div>
         </div>`;
   }
 
@@ -2284,17 +2278,6 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     location.reload();
-  }
-
-  async function openHub() {
-    try {
-      const data = await fetchJSON('/api/hub');
-      if (data?.enabled && data.url) {
-        window.open(data.url, '_blank');
-      } else {
-        toast('Hub is not configured or disabled', 'info');
-      }
-    } catch { toast('Could not fetch hub info', 'error'); }
   }
 
   function logout() {

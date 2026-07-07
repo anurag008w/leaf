@@ -9,7 +9,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import bcrypt
@@ -22,6 +22,16 @@ logging.basicConfig(
 log = logging.getLogger("zone")
 
 CONFIG_PATH = Path(__file__).parent / "config" / "zone-config.json"
+
+# Load .env file if present
+_env = Path(__file__).parent.parent / ".env"
+if _env.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env)
+        log.info("loaded .env from %s", _env)
+    except Exception:
+        pass
 STATIC_DIR = Path(__file__).parent / "static"
 DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
 ZONE_USERNAME = os.environ.get("ZONE_USERNAME", "").strip() or "admin"
@@ -302,7 +312,7 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password"}
+    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status"}
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
@@ -647,7 +657,7 @@ async def sync_trigger(request: Request):
 async def sync_status():
     if not HF_TOKEN:
         return {"enabled": False}
-    return {"enabled": True, "interval": SYNC_INTERVAL}
+    return {"enabled": True, "interval": SYNC_INTERVAL, "last_fp": _sync_last_fp is not None}
 
 @app.get("/api/sync/export")
 async def sync_export(request: Request):
@@ -694,6 +704,135 @@ async def hub_info():
     if not HUB_ENABLED or not url:
         return {"enabled": False}
     return {"enabled": True, "url": url, "space_id": SPACE_ID}
+
+# ── Public dashboard ──────────────────────────────
+@app.get("/")
+async def dashboard():
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Zone — Study OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0b0c0f;--bg-2:#121318;--bg-3:#1a1c24;--text:#e8e9ed;--text-secondary:#9ca0b0;--text-muted:#5c6070;--accent:#60a5fa;--accent-solve:#f97316;--line:#252833;--shadow:0 4px 20px rgba(0,0,0,.4)}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.dash{width:100%;max-width:500px;animation:fadeIn .6s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.card{background:var(--bg-2);border:1px solid var(--line);border-radius:20px;padding:40px 32px;text-align:center;box-shadow:var(--shadow)}
+.logo{font-size:56px;margin-bottom:8px;display:block}
+h1{font-size:22px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
+.sub{color:var(--text-muted);font-size:12px;margin-bottom:28px}
+.status-row{display:flex;gap:12px;margin-bottom:24px}
+.status-item{flex:1;background:var(--bg-3);border-radius:12px;padding:14px 10px;text-align:center;border:1px solid transparent;transition:.2s}
+.status-item.online{border-color:#34d399}
+.status-item .val{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600}
+.status-item .lbl{color:var(--text-muted);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;margin-top:4px}
+.hub-card{background:var(--bg-3);border-radius:12px;padding:16px;margin-bottom:24px;display:none;align-items:center;justify-content:space-between;border:1px solid var(--line)}
+.hub-card.show{display:flex}
+.hub-card .left{text-align:left}
+.hub-card .left .t{font-size:11px;font-weight:600;letter-spacing:1px}
+.hub-card .left .s{color:var(--text-muted);font-size:10px;margin-top:2px}
+.btn{display:inline-block;border:none;border-radius:12px;padding:14px 28px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:1.5px;cursor:pointer;transition:all .15s;text-decoration:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-primary:active{transform:scale(.98)}
+.btn-outline{background:transparent;color:var(--text-secondary);border:1px solid var(--line);padding:8px 16px;font-size:10px}
+.btn-outline:hover{background:var(--bg-3);color:var(--text);border-color:var(--text-muted)}
+.action-row{display:flex;flex-direction:column;gap:10px;margin-top:24px}
+.guest-hint{color:var(--text-muted);font-size:10px;margin-top:6px;font-family:'JetBrains Mono',monospace}
+.loader{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.footer{color:var(--text-muted);font-size:10px;margin-top:24px;font-family:'JetBrains Mono',monospace;text-align:center}
+@media(max-width:480px){.status-row{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="dash" id="app">
+  <div class="card">
+    <span class="logo">🎯</span>
+    <h1>ZONE OS</h1>
+    <p class="sub">Study Execution System</p>
+    <div class="status-row" id="statusRow">
+      <div class="status-item" id="statStatus"><div class="val" id="valStatus">—</div><div class="lbl">Status</div></div>
+      <div class="status-item" id="statUptime"><div class="val" id="valUptime">—</div><div class="lbl">Uptime</div></div>
+      <div class="status-item" id="statUsers"><div class="val" id="valUsers">—</div><div class="lbl">Users</div></div>
+      <div class="status-item" id="statSessions"><div class="val" id="valSessions">—</div><div class="lbl">Active</div></div>
+    </div>
+    <div class="hub-card" id="hubCard">
+      <div class="left">
+        <div class="t">🌐 Hugging Face Hub</div>
+        <div class="s" id="hubDesc">Sync enabled</div>
+      </div>
+      <a class="btn btn-outline" id="hubLink" href="#" target="_blank" rel="noopener">Open</a>
+    </div>
+    <div class="hub-card" id="syncCard" style="display:none">
+      <div class="left">
+        <div class="t">⚡ Dataset Sync</div>
+        <div class="s" id="syncDesc">Checking…</div>
+      </div>
+      <button class="btn btn-outline" id="syncBtn" onclick="triggerSync(this)">Sync Now</button>
+    </div>
+    <div class="action-row">
+      <a class="btn btn-primary" href="/login.html">🔑 LOGIN</a>
+      <button class="btn btn-outline" onclick="guestLogin(this)">👤 CONTINUE AS GUEST</button>
+      <div class="guest-hint">Guest data stored in your browser</div>
+    </div>
+  </div>
+  <div class="footer">ZONE · Study Execution System v4</div>
+</div>
+<script>
+async function loadStatus(){
+  try {
+    const h = await fetch('/health').then(r=>r.json());
+    document.getElementById('valStatus').textContent='ONLINE';
+    document.getElementById('valStatus').style.color='#34d399';
+    document.getElementById('statStatus').className='status-item online';
+    const u = h.uptime;
+    const d = Math.floor(u/86400), hh = Math.floor((u%86400)/3600), m = Math.floor((u%3600)/60);
+    document.getElementById('valUptime').textContent = d+'d '+hh+'h '+m+'m';
+    document.getElementById('valUsers').textContent = h.users;
+    document.getElementById('valSessions').textContent = h.active_sessions;
+  } catch {
+    document.getElementById('valStatus').textContent='OFFLINE'; document.getElementById('valStatus').style.color='#f87171';
+  }
+  try {
+    const hub = await fetch('/api/hub').then(r=>r.json());
+    if (hub.enabled && hub.url) {
+      document.getElementById('hubCard').className='hub-card show';
+      document.getElementById('hubLink').href = hub.url;
+      document.getElementById('hubDesc').textContent = hub.url.replace('https://','');
+    }
+  } catch {}
+  try {
+    const s = await fetch('/api/sync/status').then(r=>r.json());
+    if (s.enabled) {
+      document.getElementById('syncCard').style.display='flex';
+      document.getElementById('syncDesc').textContent = 'Every '+(s.interval/60)+' min'+(s.last_fp?' · synced once':'');
+    }
+  } catch {}
+}
+function guestLogin(btn){
+  btn.disabled=true; btn.textContent='Loading…';
+  fetch('/api/guest-login',{method:'POST',credentials:'same-origin'}).then(r=>r.json())
+  .then(d=>{if(!d.token)throw Error('fail');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.setItem('zone_guest','1');localStorage.removeItem('zone_user');window.location.href='/app.html'})
+  .catch(()=>{btn.disabled=false;btn.textContent='👤 CONTINUE AS GUEST'});
+}
+function triggerSync(btn){
+  btn.disabled=true; btn.textContent='Syncing…';
+  fetch('/api/sync/trigger',{method:'POST',credentials:'same-origin'})
+  .then(r=>{if(!r.ok){if(r.status===401||r.status===403)throw Error('login');return r.json()}})
+  .then(d=>{btn.textContent='✅ Synced';setTimeout(()=>{btn.disabled=false;btn.textContent='Sync Now'},3000)})
+  .catch(e=>{if(e.message==='login'){window.location.href='/login.html'}else{btn.textContent='❌ Failed';btn.disabled=false}});
+}
+loadStatus();
+</script>
+</body>
+</html>""")
 
 # ── Static files ──────────────────────────────────
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
