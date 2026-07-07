@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY --chown=user:user . .
 
-RUN mkdir -p /data /home/user/app/data && chmod 777 /data /home/user/app/data
+RUN mkdir -p /home/user/app/data && chmod 777 /home/user/app/data
 
 EXPOSE 7860
 

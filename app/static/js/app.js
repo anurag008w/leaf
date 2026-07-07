@@ -191,8 +191,8 @@ const ZoneApp = (() => {
     saveUserDataToServer('tracking');
     saveUserDataToServer('events');
     saveUserDataToServer('settings');
-    if (state.examTrack) saveUserDataToServer('examTrack');
-    if (state.examDates?.length) saveUserDataToServer('examDates');
+    saveUserDataToServer('examTrack');
+    saveUserDataToServer('examDates');
     saveUserDataToServer('onboarded');
     _lastHttpSave = Date.now();
     _pendingHttpSave = null;
@@ -336,37 +336,47 @@ const ZoneApp = (() => {
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
 
     const sessionsToday = todayEvents.filter(e => e.type === 'session_complete').length;
-    const manualToday = todayEvents.filter(e => e.type === 'zone_complete').length;
     const skipsToday = todayEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+
+    // Track which zones had timer sessions per day (to avoid double-counting zone_complete)
+    const zonesWithTimerToday = new Set(todayEvents.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
+    const zonesWithTimerAll = new Set(log.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
+
+    const manualToday = todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
     const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
       .reduce((a, e) => a + (e.duration || 0), 0)
-      + todayEvents.filter(e => e.type === 'zone_complete')
+      + todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx))
         .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
     const totalSessions = log.filter(e => e.type === 'session_complete').length;
-    const totalManual = log.filter(e => e.type === 'zone_complete').length;
+    const totalManual = log.filter(e => e.type === 'zone_complete' && !zonesWithTimerAll.has(e.zoneIdx)).length;
     const totalFocusMin = log.filter(e => e.type === 'session_complete')
       .reduce((a, e) => a + (e.duration || 0), 0)
-      + log.filter(e => e.type === 'zone_complete')
+      + log.filter(e => e.type === 'zone_complete' && !zonesWithTimerAll.has(e.zoneIdx))
         .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
 
     const dailyMap = {};
     log.forEach(e => {
-      if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
+      const date = e.date;
+      if (!dailyMap[date]) dailyMap[date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
       if (e.type === 'session_complete') {
         const d = e.duration || 0;
-        dailyMap[e.date].focusMin += d;
-        dailyMap[e.date].timerMin += d;
-        dailyMap[e.date].sessions++;
+        dailyMap[date].focusMin += d;
+        dailyMap[date].timerMin += d;
+        dailyMap[date].sessions++;
       }
       if (e.type === 'zone_complete') {
-        const d = zoneLookup(e.zoneIdx).focusDuration || 25;
-        dailyMap[e.date].focusMin += d;
-        dailyMap[e.date].manualDone++;
+        // Only count as manual if this zone had NO timer sessions this day
+        const hadTimer = log.some(ev => ev.date === date && ev.type === 'session_complete' && ev.zoneIdx === e.zoneIdx);
+        if (!hadTimer) {
+          const d = zoneLookup(e.zoneIdx).focusDuration || 25;
+          dailyMap[date].focusMin += d;
+          dailyMap[date].manualDone++;
+        }
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
-        dailyMap[e.date].skips++;
+        dailyMap[date].skips++;
       }
-      dailyMap[e.date].events.push(e);
+      dailyMap[date].events.push(e);
     });
 
     let streak = 0;
@@ -521,8 +531,18 @@ const ZoneApp = (() => {
     if (!zs) return;
     stopTimer();
     zs.running = false;
-    if (zs.blockType === 'focus') logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+    if (zs.blockType === 'focus') {
+      const partial = Math.round(((z.focusDuration || 25) * 60 - zs.remaining) / 60);
+      if (partial >= 1) {
+        state.stats.totalFocusMin += partial;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += partial;
+      }
+      logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+    }
     zs.remaining = 0;
+    zs.elapsed = 0;
     if (zs.blockType === 'focus') {
       zs.blockType = 'break';
       const bdur = getBreakDur(z, zs.cycle) * 60;
@@ -566,6 +586,7 @@ const ZoneApp = (() => {
       const bdur = getBreakDur(z, zs.cycle) * 60;
       zs.remaining = bdur;
       zs.total = bdur;
+      zs.elapsed = 0;
       chime('breakstart');
       renderAll();
     } else {
@@ -582,6 +603,7 @@ const ZoneApp = (() => {
       const dur = (z.focusDuration || 25) * 60;
       zs.remaining = dur;
       zs.total = dur;
+      zs.elapsed = 0;
       renderAll();
     }
   }
@@ -630,6 +652,7 @@ const ZoneApp = (() => {
   function finishDay() {
     state.dayComplete = true;
     stopTimer();
+    saveState();
     confetti();
     notifSend('Day Complete! 🌟', 'All zones finished!');
     toast('All zones complete! Amazing work! 🌟', 'success', 5000);
@@ -641,13 +664,14 @@ const ZoneApp = (() => {
     state.currentZoneIdx = 0;
     state.dayComplete = false;
     rebuildZoneStates();
+    saveState();
     renderAll();
   }
 
   function continueDay() {
     const zones = getZones();
     const last = zones[zones.length - 1] || {};
-    const nh = parseInt(last.endTime?.split(':')[0] || '21') + 1;
+    const nh = (parseInt(last.endTime?.split(':')[0] || '21') + 1) % 24;
     const newZone = {
       title: 'Extra',
       subtitle: 'Additional session',
@@ -1019,7 +1043,7 @@ const ZoneApp = (() => {
   }
 
   function ringSVG(fraction, colorVar) {
-    const r = 104, c = 2 * Math.PI * r, size = 260, cx = 130, cy = 130;
+    const r = 96, c = 2 * Math.PI * r, size = 260, cx = 130, cy = 130;
     const offset = c * (1 - fraction);
     let ticks = '';
     for (let i = 0; i < 60; i++) {
@@ -1076,8 +1100,9 @@ const ZoneApp = (() => {
           <div class="tlb-track"><i style="width:${focusPct}%"></i></div>
           <div class="tlb-status">${focusDone ? '✓' : (isCurFocus ? '▶' : '')}</div>
         </div>`;
-      if (i < cycles - 1) {
-        tlHTML += `<div class="tl-block tl-break ${isCurBreak ? 'current' : ''} ${breakDone ? 'done' : ''}" onclick="ZoneApp.jumpToCycle(${i+1})">
+      if (i < cycles) {
+        const breakClick = i < cycles - 1 ? `onclick="ZoneApp.jumpToCycle(${i+1})"` : '';
+        tlHTML += `<div class="tl-block tl-break ${isCurBreak ? 'current' : ''} ${breakDone ? 'done' : ''}" ${breakClick}>
           <div class="tlb-head">
             <span class="tlb-name">Break</span>
             <span class="tlb-dur">${breakDur}m</span>
@@ -1115,9 +1140,10 @@ const ZoneApp = (() => {
     const c = document.getElementById('controls');
     if (!c) return;
     if (zs?.completed) {
+      const nextIdx = state.currentZoneIdx + 1;
       c.innerHTML = `
         <button class="ctl" onclick="ZoneApp.resetZone(${state.currentZoneIdx})"><span class="ctl-icon">↺</span> RESET</button>
-        <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx + 1})"><span class="ctl-icon">⏩</span> SKIP</button>`;
+        ${nextIdx < getZones().length ? `<button class="ctl" onclick="ZoneApp.selectZone(${nextIdx})"><span class="ctl-icon">⏩</span> SKIP</button>` : ''}`;
       return;
     }
     c.innerHTML = `
@@ -1141,10 +1167,13 @@ const ZoneApp = (() => {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
     if (!z || !zs) return;
+    if (zs.cycle === cycle && zs.blockType === 'focus') return;
+    if (!confirm(`Jump to ${cycleTitle(z, cycle)}? Current progress will be lost.`)) return;
     zs.cycle = cycle;
     zs.blockType = 'focus';
     zs.remaining = (z.focusDuration || 25) * 60;
     zs.total = (z.focusDuration || 25) * 60;
+    zs.elapsed = 0;
     if (!zs.running) stopTimer();
     renderAll();
   }
@@ -1162,6 +1191,9 @@ const ZoneApp = (() => {
     const dur = z.focusDuration || 25;
     const zoneEvents = state.tracking.log.filter(e => e.zoneIdx === idx && e.date === today);
     zoneEvents.forEach(e => {
+      if (e.type === 'session_start') {
+        state.tracking.sessionCount = Math.max(0, state.tracking.sessionCount - 1);
+      }
       if (e.type === 'session_complete') {
         state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
         const d = e.duration || dur;
@@ -1473,7 +1505,7 @@ const ZoneApp = (() => {
       type, color: colors[type] || '#38BDF8',
       notes: ov.querySelector('#ev-notes')?.value?.trim() || ''
     });
-    storage().set('events', state.events);
+    saveState();
     ov.remove();
     toast('Event added!', 'success');
     renderCalendarTab();
@@ -1530,7 +1562,7 @@ const ZoneApp = (() => {
     ev.type = type;
     ev.color = colors[type] || '#38BDF8';
     ev.notes = ov.querySelector('#ev-edit-notes')?.value?.trim() || '';
-    storage().set('events', state.events);
+    saveState();
     ov.remove();
     toast('Event updated!', 'success');
     renderCalendarTab();
@@ -1540,7 +1572,7 @@ const ZoneApp = (() => {
     if (id && id.startsWith('default-')) { toast('Default events cannot be deleted', 'info'); return; }
     if (!confirm('Delete this event?')) return;
     state.events = state.events.filter(e => e.id !== id);
-    storage().set('events', state.events);
+    saveState();
     renderCalendarTab();
     toast('Event deleted', 'info');
   }
@@ -1570,7 +1602,7 @@ const ZoneApp = (() => {
         events.forEach(e => { if (!e.id) e.id = uid(); if (!e.color) e.color = '#38BDF8'; });
         if (!Array.isArray(state.events)) state.events = [];
         state.events = [...state.events, ...events];
-        storage().set('events', state.events);
+        saveState();
         renderCalendarTab();
         toast(`Imported ${count} events!`, 'success');
       } catch (e) { toast('Invalid JSON file', 'error'); }
@@ -2033,7 +2065,7 @@ const ZoneApp = (() => {
       const start = new Date(yr + '-01-01').getTime();
       const total = target - start;
       const frac = diff > 0 ? diff / total : 0;
-      const r = 90, c = 2 * Math.PI * r, size = 220, cx = 110, cy = 110;
+      const r = 80, c = 2 * Math.PI * r, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
         <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--bg-3)" stroke-width="12"/>
@@ -2149,13 +2181,13 @@ const ZoneApp = (() => {
               style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);font-size:13px;outline:none">
           </div>
         `).join('')}
-        <button class="ctl primary" style="width:100%;margin-top:8px" onclick="ZoneApp.saveExamDates()">Save Dates</button>
+        <button class="ctl primary" style="width:100%;margin-top:8px" onclick="ZoneApp.saveExamDates(this)">Save Dates</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
   }
 
-  function saveExamDates() {
+  function saveExamDates(btn) {
     const exams = getExamDates();
     const dates = exams.map((e, i) => ({
       id: e.id,
@@ -2163,7 +2195,7 @@ const ZoneApp = (() => {
     }));
     state.examDates = dates;
     storage().set('examDates', dates);
-    const ov = document.querySelector('.modal-overlay');
+    const ov = btn?.closest('.modal-overlay');
     if (ov) ov.remove();
     renderTabBody();
     toast('Exam dates saved', 'success');
@@ -2341,6 +2373,7 @@ const ZoneApp = (() => {
       _themeFxCanvas.style.display = 'block';
       _themeFxCtx = _themeFxCanvas.getContext('2d');
       resizeThemeCanvas();
+      window.removeEventListener('resize', resizeThemeCanvas);
       window.addEventListener('resize', resizeThemeCanvas);
       const fx = getThemeFx(theme);
       if (fx) fx.init();
@@ -2712,7 +2745,7 @@ const ZoneApp = (() => {
 
   function calcZoneTotal(z) {
     const focusTotal = (z.focusDuration || 25) * (z.totalCycles || 4);
-    const breaks = (z.totalCycles || 4) - 1;
+    const breaks = (z.totalCycles || 4);
     let breakTotal = 0;
     const longEvery = z.cyclesBeforeLongBreak || 4;
     for (let b = 0; b < breaks; b++) {
@@ -2733,8 +2766,8 @@ const ZoneApp = (() => {
     if (hint) {
       const total = calcZoneTotal(z);
       const tl = parseInt(tlEl?.value) || 180;
-      const ok = total === tl;
-      hint.innerHTML = `Calculated total: <strong style="color:${ok ? 'var(--accent-solve)' : 'var(--danger)'}">${total}</strong> min ${ok ? '✓' : '≠ ' + tl + ' min limit'}`;
+      const ok = total <= tl;
+      hint.innerHTML = `Calculated total: <strong style="color:${ok ? 'var(--accent-solve)' : 'var(--danger)'}">${total}</strong> min ${ok ? '✓ ≤ ' + tl : '> ' + tl + ' min limit'}`;
     }
   }
 
@@ -2813,7 +2846,7 @@ const ZoneApp = (() => {
     const badZones = [];
     zones.forEach((z, i) => {
       const total = calcZoneTotal(z);
-      if (total !== z.timeLimit) {
+      if (total > z.timeLimit) {
         err = true;
         badZones.push(z.title || `Zone ${i+1}`);
         const card = document.querySelectorAll('.zone-editor-card')[i];
@@ -2824,7 +2857,7 @@ const ZoneApp = (() => {
       }
     });
     if (err) {
-      toast(`⛔ Adjust timing: ${badZones.join(', ')} total ≠ max time limit`, 'error');
+      toast(`⛔ ${badZones.join(', ')} total > max time limit`, 'error');
       return;
     }
 
@@ -2917,6 +2950,9 @@ const ZoneApp = (() => {
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'events', value: {} }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'settings', value: {} }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examTrack', value: null }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examDates', value: [] }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'onboarded', value: false }) }),
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
@@ -2925,7 +2961,14 @@ const ZoneApp = (() => {
       });
     });
     // Save empty state to localStorage so beforeunload doesn't restore old data
-    saveState();
+    storage().set('onboarded', state.onboarded);
+    storage().set('session', { currentZoneIdx: 0, byZone: {}, dayComplete: false });
+    storage().set('events', []);
+    storage().set('stats', state.stats);
+    storage().set('tracking', state.tracking);
+    storage().set('settings', state.settings);
+    storage().set('examTrack', null);
+    storage().set('examDates', []);
     location.reload();
   }
 
@@ -2943,8 +2986,10 @@ const ZoneApp = (() => {
   async function generateResetKey() {
     try {
       const r = await fetchJSON('/api/admin/generate-reset-key', { method: 'POST' });
-      document.getElementById('resetKeyValue').textContent = r.key;
-      document.getElementById('resetKeyDisplay').style.display = 'block';
+      const val = document.getElementById('resetKeyValue');
+      const dsp = document.getElementById('resetKeyDisplay');
+      if (val) val.textContent = r.key;
+      if (dsp) dsp.style.display = 'block';
       toast('Reset key generated! Share it with the user.', 'success');
     } catch { toast('Failed to generate key', 'error'); }
   }
@@ -3146,7 +3191,7 @@ const ZoneApp = (() => {
       const savedCfg = storage().get('config');
       if (savedCfg) {
         if (savedCfg.zones?.length) state.config.zones = savedCfg.zones;
-        if (savedCfg.identity) Object.assign(state.config.identity, savedCfg.identity);
+        if (savedCfg.identity) Object.assign(state.config.identity ??= {}, savedCfg.identity);
       }
 
       (state.config.zones || []).forEach(z => {

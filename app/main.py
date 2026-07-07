@@ -156,7 +156,7 @@ def check_password(pw: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(pw.encode(), hashed.encode())
     except Exception:
-        return pw == hashed  # fallback for legacy plaintext
+        return False
 
 def is_guest(token: str) -> bool:
     return token.startswith(GUEST_PREFIX)
@@ -164,7 +164,7 @@ def is_guest(token: str) -> bool:
 def user_dir(username: str) -> Path:
     return DATA_DIR / "users" / username
 
-def _read_json(p: Path) -> dict:
+def _read_json(p: Path) -> Any:
     if p.exists():
         try:
             raw = p.read_text()
