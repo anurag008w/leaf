@@ -321,14 +321,10 @@ async def auth_middleware(request: Request, call_next):
             request.state.username = resolve_username(token)
             return await call_next(request)
     else:
-        # non-api: static files, require auth
         token = request.cookies.get(COOKIE_NAME, "")
-        if not token or token not in _active_tokens:
-            resp = RedirectResponse(url="/login.html")
-            resp.delete_cookie(COOKIE_NAME)
-            return resp
-        request.state.token = token
-        request.state.username = resolve_username(token)
+        if token and token in _active_tokens:
+            request.state.token = token
+            request.state.username = resolve_username(token)
 
     resp = await call_next(request)
     ct = resp.headers.get("content-type", "")
