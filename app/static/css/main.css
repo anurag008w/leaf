@@ -815,12 +815,13 @@ input[type=color] { width: 44px; height: 36px; border: 1px solid var(--line); bo
 }
 .cal-nav-left { display: flex; gap: 6px; align-items: center; }
 .cal-nav-btn {
-  width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--bg-2); color: var(--text-secondary); cursor: pointer;
+  width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text-muted); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; transition: border-color var(--transition), color var(--transition);
+  font-size: 14px; transition: all 0.15s;
 }
-.cal-nav-btn:hover { border-color: var(--accent-lecture); color: var(--text-primary); }
+.cal-nav-btn:hover { border-color: var(--accent-lecture); color: var(--text-primary); background: var(--bg-3); }
+.cal-nav-btn:active { transform: scale(0.92); }
 .cal-month-label {
   font-size: 16px; font-weight: 600; min-width: 160px; text-align: center;
 }
