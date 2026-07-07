@@ -311,15 +311,15 @@ const ZoneApp = (() => {
 
     const dailyMap = {};
     log.forEach(e => {
+      if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0, events: [] };
       if (e.type === 'session_complete') {
-        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0 };
         dailyMap[e.date].focusMin += (e.duration || 0);
         dailyMap[e.date].sessions++;
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
-        if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0 };
         dailyMap[e.date].skips++;
       }
+      dailyMap[e.date].events.push(e);
     });
 
     let streak = 0;
@@ -340,8 +340,23 @@ const ZoneApp = (() => {
       ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
     }));
 
+    // Build month-grouped sorted entries
+    const sortedEntries = Object.entries(dailyMap).sort((a, b) => b[0].localeCompare(a[0]));
+    const monthGroups = [];
+    sortedEntries.forEach(([date, data]) => {
+      const m = date.slice(0, 7);
+      if (!monthGroups.length || monthGroups[monthGroups.length - 1].month !== m) {
+        monthGroups.push({ month: m, label: new Date(m + '-01').toLocaleDateString('en', { year: 'numeric', month: 'long' }), days: [], totalFocus: 0, totalSessions: 0, totalSkips: 0 });
+      }
+      const g = monthGroups[monthGroups.length - 1];
+      g.days.push({ date, ...data });
+      g.totalFocus += data.focusMin;
+      g.totalSessions += data.sessions;
+      g.totalSkips += data.skips;
+    });
+
     return { todayEvents, sessionsToday, skipsToday, focusMinToday,
-      totalSessions, totalFocusMin, dailyMap, streak, zoneData, log };
+      totalSessions, totalFocusMin, dailyMap, streak, zoneData, log, monthGroups };
   }
 
   // ─── Zone Config ──────────────────────────────
@@ -1597,26 +1612,29 @@ const ZoneApp = (() => {
                 <th>Rate</th>
               </tr></thead>
               <tbody>
-                ${Object.entries(ts.dailyMap).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30).map(([date, d]) => {
-                  const total = d.sessions + d.skips;
-                  const rate = total > 0 ? Math.round((d.sessions / total) * 100) + '%' : '—';
-                  const dateObj = new Date(date + 'T00:00:00');
-                  const label = dateObj.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
-                  const isToday = date === todayKey();
-                  const minBar = Math.min(d.focusMin, 200);
-                  return `<tr class="${isToday ? 'today-row' : ''}">
-                    <td class="dt-date">${label}</td>
-                    <td class="dt-focus">
-                      <div class="min-bar-wrap">
-                        <div class="min-bar" style="width:${(minBar / 200) * 100}%"></div>
-                        <span class="min-val">${d.focusMin}m</span>
-                      </div>
-                    </td>
-                    <td class="dt-num">${d.sessions}</td>
-                    <td class="dt-num ${d.skips > 2 ? 'dt-warn' : ''}">${d.skips}</td>
-                    <td class="dt-num">${rate}</td>
-                  </tr>`;
-                }).join('')}
+                ${ts.monthGroups.map(g => `
+                  <tr class="month-row"><td colspan="5">${esc(g.label)} <span class="month-total">${g.totalFocus}m · ${g.totalSessions} sessions · ${g.totalSkips} skips</span></td></tr>
+                  ${g.days.map(d => {
+                    const total = d.sessions + d.skips;
+                    const rate = total > 0 ? Math.round((d.sessions / total) * 100) + '%' : '—';
+                    const dateObj = new Date(d.date + 'T00:00:00');
+                    const label = dateObj.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
+                    const isToday = d.date === todayKey();
+                    const minBar = Math.min(d.focusMin, 200);
+                    return `<tr class="${isToday ? 'today-row' : ''}" onclick="ZoneApp.showDayReport('${d.date}')" style="cursor:pointer">
+                      <td class="dt-date">${label}</td>
+                      <td class="dt-focus">
+                        <div class="min-bar-wrap">
+                          <div class="min-bar" style="width:${(minBar / 200) * 100}%"></div>
+                          <span class="min-val">${d.focusMin}m</span>
+                        </div>
+                      </td>
+                      <td class="dt-num">${d.sessions}</td>
+                      <td class="dt-num ${d.skips > 2 ? 'dt-warn' : ''}">${d.skips}</td>
+                      <td class="dt-num">${rate}</td>
+                    </tr>`;
+                  }).join('')}
+                `).join('')}
               </tbody>
             </table>
           </div>
@@ -1667,6 +1685,58 @@ const ZoneApp = (() => {
 
     // Initialize charts after DOM is ready
     setTimeout(() => initCharts(ts), 100);
+  }
+
+  function showDayReport(date) {
+    const log = state.tracking.log;
+    const events = log.filter(e => e.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const totalFocus = events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+    const sessions = events.filter(e => e.type === 'session_complete').length;
+    const skips = events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+    const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
+    const dateObj = new Date(date + 'T00:00:00');
+    const label = dateObj.toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const iconMap = { session_start: '▶', session_complete: '✓', skip_block: '⏭', pause: '⏸', skip_zone: '⏩', zone_complete: '🏁', break: '☕' };
+    const clsMap = { session_start: 'start', session_complete: 'complete', skip_block: 'skip', pause: 'pause', skip_zone: 'skip', zone_complete: 'zone', break: 'break' };
+    const labelMap = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', zone_complete: 'Zone complete', break: 'Break started' };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal day-report-modal">
+      <div class="modal-header">
+        <h3 style="font-size:16px">📅 ${esc(label)}</h3>
+        <button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="dr-summary">
+          <div class="dr-stat"><span class="dr-num">${totalFocus}</span><span class="dr-lbl">Focus min</span></div>
+          <div class="dr-stat"><span class="dr-num">${sessions}</span><span class="dr-lbl">Sessions</span></div>
+          <div class="dr-stat"><span class="dr-num">${skips}</span><span class="dr-lbl">Skips</span></div>
+          <div class="dr-stat"><span class="dr-num">${rate}%</span><span class="dr-lbl">Completion</span></div>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin:16px 0 10px;letter-spacing:1px">Timeline</div>
+        <div class="event-timeline" style="max-height:300px;overflow-y:auto">
+          ${events.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No activity on this day</div>'
+          : events.map(e => {
+            const icon = iconMap[e.type] || '•';
+            const cls = clsMap[e.type] || '';
+            const l = labelMap[e.type] || e.type;
+            const detail = e.zoneIdx !== undefined ? `Zone ${(e.zoneIdx || 0) + 1}` : '';
+            const time = e.time ? e.time.slice(11, 16) : '--:--';
+            return `<div class="event-item">
+              <span class="event-time">${time}</span>
+              <span class="event-icon ${cls}">${icon}</span>
+              <span class="event-label">${l}</span>
+              ${detail ? `<span class="event-detail">${detail}</span>` : ''}
+              ${e.duration ? `<span class="event-detail">${e.duration}min</span>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   }
 
   function initCharts(ts) {
