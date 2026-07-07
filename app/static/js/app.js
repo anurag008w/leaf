@@ -122,27 +122,27 @@ const ZoneApp = (() => {
 
   const EXAM_DATES_BY_TRACK = {
     JEE: [
-      { id: 'jee_main', name: 'JEE Main 2026', defaultDate: '2026-04-01', icon: '📝' },
-      { id: 'jee_adv', name: 'JEE Advanced 2026', defaultDate: '2026-05-17', icon: '🎯' }
+      { id: 'jee_main', name: 'JEE Main 2027', defaultDate: '2027-01-24', icon: '📝' },
+      { id: 'jee_adv', name: 'JEE Advanced 2027', defaultDate: '2027-05-23', icon: '🎯' }
     ],
     NEET: [
-      { id: 'neet', name: 'NEET UG 2026', defaultDate: '2026-05-03', icon: '⚕️' }
+      { id: 'neet', name: 'NEET UG 2027', defaultDate: '2027-05-02', icon: '⚕️' }
     ],
     UPSC: [
-      { id: 'upsc_pre', name: 'UPSC Prelims 2026', defaultDate: '2026-06-14', icon: '📋' },
-      { id: 'upsc_main', name: 'UPSC Mains 2026', defaultDate: '2026-09-20', icon: '📚' }
+      { id: 'upsc_pre', name: 'UPSC Prelims 2027', defaultDate: '2027-06-13', icon: '📋' },
+      { id: 'upsc_main', name: 'UPSC Mains 2027', defaultDate: '2027-09-19', icon: '📚' }
     ],
     GATE: [
-      { id: 'gate', name: 'GATE 2026', defaultDate: '2026-02-07', icon: '⚙️' }
+      { id: 'gate', name: 'GATE 2027', defaultDate: '2027-02-07', icon: '⚙️' }
     ],
     CA: [
-      { id: 'ca', name: 'CA Exams 2026', defaultDate: '2026-05-15', icon: '📊' }
+      { id: 'ca', name: 'CA Exams 2027', defaultDate: '2027-05-15', icon: '📊' }
     ],
     BOARDS: [
-      { id: 'boards', name: 'Board Exams 2026', defaultDate: '2026-03-01', icon: '🏫' }
+      { id: 'boards', name: 'Board Exams 2027', defaultDate: '2027-03-01', icon: '🏫' }
     ],
     CUSTOM: [
-      { id: 'custom', name: 'Target Date 2026', defaultDate: '2026-06-01', icon: '🎯' }
+      { id: 'custom', name: 'Target Date', defaultDate: '2027-06-01', icon: '🎯' }
     ]
   };
 
@@ -2028,7 +2028,23 @@ const ZoneApp = (() => {
   function renderExamTimerTab() {
     const body = document.getElementById('tabBody');
     const exams = getExamDates();
-    const now = new Date();
+    const now = Date.now();
+
+    function ringSVG(target) {
+      const diff = target - now;
+      const yr = new Date(target).getFullYear();
+      const start = new Date(yr + '-01-01').getTime();
+      const total = target - start;
+      const frac = diff > 0 ? diff / total : 0;
+      const r = 90, c = 2 * Math.PI * r, size = 220, cx = 110, cy = 110;
+      const offset = c * (1 - frac);
+      return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
+        <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--bg-3)" stroke-width="12"/>
+        <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--accent-lecture)" stroke-width="12"
+          stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"
+          style="transition:stroke-dashoffset .5s linear;transform:rotate(-90deg);transform-origin:${cx}px ${cy}px"/>
+      </svg>`;
+    }
 
     body.innerHTML = `
       <div class="exam-timer-wrap">
@@ -2047,17 +2063,20 @@ const ZoneApp = (() => {
                 <span class="exam-name">${esc(e.name)}</span>
                 <span class="exam-date">${e.date}</span>
               </div>
-              <div class="exam-countdown" id="ecd-${i}">
-                ${expired ? '<div class="exam-expired">🎉 Exam Date Reached</div>'
-                : `
-                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
-                  <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
-                  <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
-                  <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>
-                `}
+              <div class="exam-countdown-wrap">
+                ${!expired ? ringSVG(target) : ''}
+                <div class="exam-countdown" id="ecd-${i}">
+                  ${expired ? '<div class="exam-expired">🎉 Exam Date Reached</div>'
+                  : `
+                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
+                    <span class="exam-sep">:</span>
+                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
+                    <span class="exam-sep">:</span>
+                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
+                    <span class="exam-sep">:</span>
+                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>
+                  `}
+                </div>
               </div>
               ${!expired ? `<div class="exam-total" id="ecd-${i}-total">0 days remaining</div>` : ''}
             </div>`;
@@ -2079,6 +2098,9 @@ const ZoneApp = (() => {
         const cd = card.querySelector('.exam-countdown');
         if (cd && !cd.querySelector('.exam-expired')) {
           cd.innerHTML = '<div class="exam-expired">🎉 Exam Date Reached</div>';
+          const wrap = card.querySelector('.exam-countdown-wrap');
+          const ring = wrap?.querySelector('.exam-ring-svg');
+          if (ring) ring.remove();
           const total = card.querySelector('.exam-total');
           if (total) total.remove();
           card.classList.add('expired');
@@ -2099,6 +2121,15 @@ const ZoneApp = (() => {
       if (mEl) mEl.textContent = String(mins).padStart(2,'0');
       if (sEl) sEl.textContent = String(secs).padStart(2,'0');
       if (tEl) tEl.textContent = days + ' days remaining';
+      const ring = card.querySelector('.exam-ring-svg circle:last-child');
+      if (ring) {
+        const yr = new Date(target).getFullYear();
+        const start = new Date(yr + '-01-01').getTime();
+        const total = target - start;
+        const frac = diff > 0 ? diff / total : 0;
+        const c = 2 * Math.PI * 90;
+        ring.setAttribute('stroke-dashoffset', c * (1 - frac));
+      }
     });
   }
 

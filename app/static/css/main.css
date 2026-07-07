@@ -997,29 +997,33 @@ input[type=range]::-moz-range-track {
 .exam-card-head {
   display: flex; align-items: center; gap: 10px; width: 100%;
 }
-.exam-icon { font-size: 24px; }
-.exam-name { font-size: 14px; font-weight: 600; flex: 1; }
+.exam-icon { font-size: 28px; }
+.exam-name { font-size: 15px; font-weight: 600; flex: 1; }
 .exam-date { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.exam-countdown-wrap {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 240px; height: 200px; margin: 8px 0;
+}
 .exam-countdown {
-  display: flex; align-items: center; gap: 4px;
-  font-family: var(--mono); padding: 16px 0;
+  display: flex; align-items: center; gap: 2px;
+  font-family: var(--mono); z-index: 1;
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
 }
 .exam-unit {
-  display: flex; flex-direction: column; align-items: center; min-width: 56px;
-  background: var(--bg-2); border-radius: var(--r-sm); padding: 10px 6px;
-  border: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; align-items: center; min-width: 46px;
 }
 .exam-num {
-  font-size: 28px; font-weight: 700; color: var(--accent-lecture);
-  line-height: 1.1; letter-spacing: 2px;
+  font-size: 34px; font-weight: 700; color: var(--accent-lecture);
+  line-height: 1; letter-spacing: 1px; font-variant-numeric: tabular-nums;
 }
 .exam-lbl {
-  font-size: 9px; color: var(--text-muted); letter-spacing: 1.5px;
-  text-transform: uppercase; margin-top: 4px;
+  font-size: 8px; color: var(--text-muted); letter-spacing: 1.5px;
+  text-transform: uppercase; margin-top: 6px;
 }
-.exam-sep { font-size: 22px; color: var(--text-muted); font-weight: 300; margin: 0 2px; align-self: center; padding-bottom: 14px; }
-.exam-total { font-size: 11px; color: var(--text-muted); font-family: var(--mono); letter-spacing: 1px; }
+.exam-sep { font-size: 24px; color: var(--text-muted); font-weight: 300; margin: 0 1px; align-self: center; padding-bottom: 4px; }
+.exam-total { font-size: 12px; color: var(--text-muted); font-family: var(--mono); letter-spacing: 1px; margin-top: -4px; }
 .exam-expired { font-size: 16px; font-weight: 600; color: var(--accent-solve); padding: 8px 0; }
+.exam-ring-svg { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
 #tabBody { animation: fadeIn 0.2s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
