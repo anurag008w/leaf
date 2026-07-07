@@ -9,6 +9,5 @@ node_modules
 *.md
 *.docx
 data/
-secret.key
 *.log
 /tmp/

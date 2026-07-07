@@ -1,6 +1,5 @@
 # Secrets & user data
 data/
-secret.key
 *.env
 .env.*
 !.env.example

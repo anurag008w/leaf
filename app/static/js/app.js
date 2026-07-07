@@ -24,7 +24,7 @@ const ZoneApp = (() => {
 
   let $root, $toastContainer;
 
-  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const uid = () => Math.random().toString(36).slice(2,9);
 
   function fmtTime(s) {
@@ -149,6 +149,25 @@ const ZoneApp = (() => {
     } catch {}
   }
 
+  let _lastHttpSave = 0;
+  let _pendingHttpSave = null;
+
+  function _flushHttpSave() {
+    if (isGuest()) return;
+    const session = {
+      currentZoneIdx: state.currentZoneIdx,
+      byZone: state.byZone,
+      dayComplete: state.dayComplete
+    };
+    saveUserDataToServer('session', session);
+    saveUserDataToServer('stats');
+    saveUserDataToServer('tracking');
+    saveUserDataToServer('events');
+    saveUserDataToServer('settings');
+    _lastHttpSave = Date.now();
+    _pendingHttpSave = null;
+  }
+
   function saveState() {
     const session = {
       currentZoneIdx: state.currentZoneIdx,
@@ -162,13 +181,13 @@ const ZoneApp = (() => {
     storage().set('tracking', state.tracking);
     storage().set('settings', state.settings);
     storage().set('examTrack', state.examTrack);
-    if (!isGuest()) {
-      saveUserDataToServer('session', session);
-      saveUserDataToServer('stats');
-      saveUserDataToServer('tracking');
-      saveUserDataToServer('events');
-      saveUserDataToServer('settings');
+    if (isGuest()) return;
+    const now = Date.now();
+    if (now - _lastHttpSave < 5000) {
+      if (!_pendingHttpSave) _pendingHttpSave = setTimeout(_flushHttpSave, 5000 - (now - _lastHttpSave));
+      return;
     }
+    _flushHttpSave();
   }
 
   function loadSession() { return storage().get('session'); }
@@ -371,6 +390,16 @@ const ZoneApp = (() => {
     if (z && z.timeLimit && (zs.elapsed >= z.timeLimit * 60)) {
       stopTimer();
       zs.running = false;
+      if (zs.blockType === 'focus') {
+        const actualMin = Math.round(zs.elapsed / 60);
+        logEvent('session_complete', { zoneIdx: state.currentZoneIdx, duration: actualMin, cycle: zs.cycle, skipped: false });
+        state.stats.totalSessions++;
+        state.stats.totalFocusMin += actualMin;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += actualMin;
+        state.stats.history[key].sessions++;
+      }
       toast(`Time limit reached for "${z.title}" — auto-completing`, 'warning');
       completeZone();
       return;
@@ -503,12 +532,13 @@ const ZoneApp = (() => {
     const zs = getCurrentZs();
     logEvent('zone_complete', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
     if (z) toast(`Zone ${z.title} complete! 🎉`, 'success');
-    confetti();
-    notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
     stopTimer();
     if (zs) { zs.running = false; zs.completed = true; }
+    saveState();
     const next = state.currentZoneIdx + 1;
     if (next >= getZones().length) { finishDay(); return; }
+    confetti();
+    notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
     state.currentZoneIdx = next;
     const nz = getZone(next);
     const nzs = state.byZone[next];
@@ -523,6 +553,9 @@ const ZoneApp = (() => {
     state.tracking.log.push({ id: uid(), date: todayKey(), time: new Date().toISOString(), type: 'zone_complete', ...evData });
     if (!state.tracking.zoneStats[idx]) state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
     state.tracking.zoneStats[idx].doneNoTimer++;
+    state.stats.totalSessions++;
+    if (z) state.stats.totalFocusMin += (z.focusDuration || 25);
+    saveState();
     if (zs) { zs.running = false; zs.completed = true; stopTimer(); }
     const next = idx + 1;
     if (next >= getZones().length) { finishDay(); renderAll(); return; }
@@ -611,28 +644,42 @@ const ZoneApp = (() => {
   }
 
   // ─── SET EXAM TRACK ─────────────────────────
-  async function setExamTrack(trackId) {
+  async function setExamTrack(trackId, year) {
     const track = state.tracks.find(t => t.id === trackId);
     if (!track) return;
+    const y = year || new Date().getFullYear();
     const goals = {
-      JEE: { goal: 'JEE Advanced 2026', tag: 'Consistency over intensity' },
-      NEET: { goal: 'NEET UG 2026', tag: 'Master the concepts, ace the exam' },
-      UPSC: { goal: 'UPSC CSE 2026', tag: 'Perseverance, patience, preparation' },
-      GATE: { goal: 'GATE 2027', tag: 'Deep understanding wins' },
-      CA: { goal: 'CA Exams', tag: 'Discipline is the bridge' },
-      BOARDS: { goal: 'Board Exams', tag: 'Excellence is a habit' },
-      CUSTOM: { goal: 'My Goal', tag: 'My pace, my path' }
+      JEE: { goal: 'JEE Advanced ' + y, tag: 'Consistency over intensity' },
+      NEET: { goal: 'NEET UG ' + y, tag: 'Master the concepts, ace the exam' },
+      UPSC: { goal: 'UPSC CSE ' + y, tag: 'Perseverance, patience, preparation' },
+      GATE: { goal: 'GATE ' + y, tag: 'Deep understanding wins' },
+      CA: { goal: 'CA Exams ' + y, tag: 'Discipline is the bridge' },
+      BOARDS: { goal: 'Board Exams ' + y, tag: 'Excellence is a habit' },
+      CUSTOM: { goal: 'My Goal ' + y, tag: 'My pace, my path' }
     };
     const info = goals[trackId] || goals.CUSTOM;
     state.examTrack = track.name;
     state.config.identity.examTrack = track.name;
     state.config.identity.goalName = info.goal;
     state.config.identity.tagline = info.tag;
-    track.zones.forEach((tz, i) => {
-      if (state.config.zones[i]) {
-        state.config.zones[i].title = tz.title;
-        state.config.zones[i].subtitle = tz.subtitle;
-      }
+    state.config.zones = track.zones.map((tz, i) => {
+      const existing = state.config.zones[i] || {};
+      return {
+        id: tz.id ?? existing.id ?? i + 1,
+        title: tz.title,
+        subtitle: tz.subtitle,
+        type: existing.type || 'focus',
+        focusDuration: existing.focusDuration || 50,
+        breakDuration: existing.breakDuration || 10,
+        longBreakDuration: existing.longBreakDuration || 20,
+        cyclesBeforeLongBreak: existing.cyclesBeforeLongBreak || 3,
+        totalCycles: existing.totalCycles || 4,
+        startTime: existing.startTime || '',
+        endTime: existing.endTime || '',
+        color: existing.color || ['#7c3aed','#059669','#d97706','#2563eb','#dc2626'][i % 5],
+        timeLimit: existing.timeLimit || 180,
+        cycleTitles: existing.cycleTitles || [],
+      };
     });
     await apiUpdateConfig(state.config);
     storage().set('config', state.config);
@@ -709,7 +756,7 @@ const ZoneApp = (() => {
       c.innerHTML = `<div class="tc-name">${esc(t.name)}</div>
         <div class="tc-cat">${esc(t.zones?.[0]?.subtitle || '')}</div>
         ${t.zones ? `<div class="tc-subjects">${t.zones.map(z => z.title).join(' · ')}</div>` : ''}`;
-      c.addEventListener('click', () => setExamTrack(t.id));
+      c.addEventListener('click', () => selectExamTrack(t.id));
       grid.appendChild(c);
     });
   }
@@ -725,8 +772,9 @@ const ZoneApp = (() => {
   function renderConsoleTab() {
     const body = document.getElementById('tabBody');
     const zones = getZones();
+    if (!zones.length) { body.innerHTML = '<div class="note-bar">No zones configured.</div>'; return; }
+    if (state.currentZoneIdx >= zones.length) state.currentZoneIdx = 0;
     const cur = getZone(state.currentZoneIdx);
-    if (!cur) { body.innerHTML = '<div class="note-bar">No zones configured.</div>'; return; }
 
     if (state.dayComplete) {
       const todayEvents = getTodayLog();
@@ -1113,7 +1161,38 @@ const ZoneApp = (() => {
 
   function selectExamTrack(id) {
     closeModal('onboardOv');
-    setExamTrack(id);
+    const preset = {
+      JEE: 'JEE Advanced',
+      NEET: 'NEET UG',
+      UPSC: 'UPSC CSE',
+      GATE: 'GATE',
+      CA: 'CA Exams',
+      BOARDS: 'Board Exams',
+      CUSTOM: 'My Goal'
+    };
+    const label = preset[id] || id;
+    const yr = new Date().getFullYear();
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'yearOv';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:300px">
+        <div class="modal-header"><h3>${label} — Year</h3></div>
+        <div class="modal-body" style="gap:12px">
+          <p style="font-size:13px;color:var(--text-muted);margin:0">Which year are you targeting?</p>
+          <input type="number" id="targetYear" value="${yr}" min="${yr}" max="${yr+10}" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);font-size:16px;text-align:center;outline:none">
+          <button class="ctl primary" style="width:100%" onclick="ZoneApp.confirmExamTrack('${id}')">Set Target</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('targetYear')?.focus(), 100);
+  }
+
+  function confirmExamTrack(id) {
+    const year = document.getElementById('targetYear')?.value || new Date().getFullYear();
+    closeModal('yearOv');
+    setExamTrack(id, year);
   }
 
   function closeModal(id) {
@@ -1274,6 +1353,7 @@ const ZoneApp = (() => {
     if (!title) { toast('Please enter a title', 'warning'); return; }
     const colors = { lecture: '#38BDF8', test: '#F26B6B', coaching: '#FBBF24', break: '#34D399', meal: '#A78BFA', personal: '#F472B6', travel: '#FB923C', meeting: '#A78BFA' };
     const type = ov.querySelector('#ev-type').value;
+    if (!Array.isArray(state.events)) state.events = [];
     state.events.push({
       id: uid(), title, date: ov.querySelector('#ev-date').value,
       start: ov.querySelector('#ev-start').value, end: ov.querySelector('#ev-end').value,
@@ -1356,9 +1436,11 @@ const ZoneApp = (() => {
     const data = { version: 1, exportedAt: new Date().toISOString(), events: state.events };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    a.href = url;
     a.download = `zone-events-${todayKey()}.json`;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
     toast('Events exported!', 'success');
   }
 
@@ -1373,6 +1455,7 @@ const ZoneApp = (() => {
         const count = events.filter(e => e.title && e.date).length;
         if (count === 0) { toast('Invalid event data', 'error'); return; }
         events.forEach(e => { if (!e.id) e.id = uid(); if (!e.color) e.color = '#38BDF8'; });
+        if (!Array.isArray(state.events)) state.events = [];
         state.events = [...state.events, ...events];
         storage().set('events', state.events);
         renderCalendarTab();
@@ -1717,7 +1800,7 @@ const ZoneApp = (() => {
       <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
         <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
         <div class="settings-grid">
-          ${!isGuest() ? `
+          ${state.username ? `
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Account</div>
             <div style="display:flex;flex-direction:column;gap:10px">
@@ -1783,9 +1866,10 @@ const ZoneApp = (() => {
           <div class="settings-card" style="grid-column:1/-1">
             <div class="field-label" style="margin-bottom:14px">Schedule Editor</div>
             <div id="zoneEditorList">${renderZoneEditors()}</div>
-            <div style="margin-top:14px">
-              <button class="ctl" onclick="ZoneApp.saveZoneEdits()" style="padding:8px 18px;font-size:11px;font-weight:600">💾 Save Schedule</button>
-              <span style="font-size:10px;color:var(--text-muted);margin-left:10px;font-family:var(--mono)">Changes apply after day reset</span>
+            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button class="ctl" onclick="ZoneApp.addZone()" style="padding:8px 18px;font-size:11px">+ Add Zone</button>
+              <button class="ctl primary" onclick="ZoneApp.saveZoneEdits()" style="padding:8px 18px;font-size:11px;font-weight:600">💾 Save Schedule</button>
+              <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">Changes apply after day reset</span>
             </div>
           </div>
           <div class="settings-card">
@@ -1797,14 +1881,6 @@ const ZoneApp = (() => {
               <button class="ctl" onclick="ZoneApp.clearStats()" style="padding:8px 16px;font-size:11px">🗑 Clear Stats</button>
               <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
             </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Cloud Sync</div>
-            <div style="display:flex;flex-wrap:wrap;gap:10px">
-              <button class="ctl" onclick="ZoneApp.syncHfUpload()" style="padding:8px 16px;font-size:11px">☁ Upload to HF</button>
-              <button class="ctl" onclick="ZoneApp.syncHfDownload()" style="padding:8px 16px;font-size:11px">☁ Download from HF</button>
-            </div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:8px;font-family:var(--mono)">Set HF_TOKEN &amp; SYNC_DATASET env vars</div>
           </div>
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Session</div>
@@ -1836,6 +1912,7 @@ const ZoneApp = (() => {
   function toggleSetting(key) {
     state.settings[key] = !state.settings[key];
     storage().set('settings', state.settings);
+    if (!isGuest()) saveUserDataToServer('settings');
     renderTabBody();
   }
 
@@ -2025,6 +2102,43 @@ const ZoneApp = (() => {
     }
   }
 
+  let _zoneIdCounter = 0;
+  function _nextZoneId() {
+    _zoneIdCounter = Math.max(_zoneIdCounter, ...getZones().map(z => z.id || 0)) + 1;
+    return _zoneIdCounter;
+  }
+
+  function addZone() {
+    const zones = getZones();
+    const last = zones[zones.length - 1] || {};
+    const prevEnd = last.endTime || '21:00';
+    const [h, m] = prevEnd.split(':').map(Number);
+    const nextStart = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    let nextEnd;
+    if (h >= 22) {
+      nextEnd = '23:00';
+    } else {
+      nextEnd = `${String(Math.min(h + 2, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    if (nextEnd <= nextStart) nextEnd = '23:00';
+    const colors = ['#38BDF8','#F26B6B','#FBBF24','#34D399','#A78BFA','#F472B6','#FB923C'];
+    const newZone = {
+      id: _nextZoneId(),
+      title: `Zone ${_zoneIdCounter}`,
+      subtitle: 'New session',
+      type: 'focus',
+      color: colors[zones.length % colors.length],
+      startTime: nextStart,
+      endTime: nextEnd,
+      focusDuration: 25, breakDuration: 5, longBreakDuration: 15,
+      cyclesBeforeLongBreak: 4, totalCycles: 4,
+      timeLimit: 180, cycleTitles: []
+    };
+    zones.push(newZone);
+    renderTabBody();
+    toast('New zone added!', 'success');
+  }
+
   function saveZoneEdits() {
     const zones = getZones();
     zones.forEach((z, i) => {
@@ -2084,6 +2198,8 @@ const ZoneApp = (() => {
     });
     state.config.zones = zones;
     saveConfig();
+    if (state.currentZoneIdx >= zones.length) state.currentZoneIdx = Math.max(0, zones.length - 1);
+    rebuildZoneStates();
     toast('Schedule saved! Reset day to apply changes.', 'success');
   }
 
@@ -2094,6 +2210,8 @@ const ZoneApp = (() => {
     zones.splice(idx, 1);
     state.config.zones = zones;
     storage().set('config', state.config);
+    if (state.currentZoneIdx >= zones.length) state.currentZoneIdx = Math.max(0, zones.length - 1);
+    rebuildZoneStates();
     renderTabBody();
     toast('Zone removed', 'info');
   }
@@ -2101,7 +2219,9 @@ const ZoneApp = (() => {
   function exportConfig() {
     const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'zone-config.json'; a.click();
+    const url = URL.createObjectURL(blob);
+    a.href = url; a.download = 'zone-config.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
     toast('Config exported!', 'success');
   }
 
@@ -2139,15 +2259,35 @@ const ZoneApp = (() => {
     }
   }
 
-  function resetAll() {
-    if (confirm('Reset all data? This cannot be undone.')) {
-      localStorage.clear();
-      location.reload();
-    }
+  async function resetAll() {
+    if (!confirm('Reset all data? This cannot be undone.')) return;
+    state.onboarded = false;
+    ['zu:', 'zg:', 'zone:'].forEach(p => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
+        try { localStorage.removeItem(p + k); } catch {}
+      });
+    });
+    try {
+      await Promise.all([
+        fetch('/api/config', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ zones: [], identity: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'stats', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'tracking', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'events', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'settings', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: {} }) }),
+      ]);
+    } catch {}
+    location.reload();
   }
 
   function logout() {
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
+    ['zu:', 'zg:', 'zone:'].forEach(p => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
+        try { localStorage.removeItem(p + k); } catch {}
+      });
+    });
+    try { localStorage.removeItem('zone_user'); localStorage.removeItem('zone_guest'); } catch {}
     window.location.href = '/login.html';
   }
 
@@ -2166,7 +2306,9 @@ const ZoneApp = (() => {
       if (!d) return;
       const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = 'zone-backup-' + Date.now() + '.json'; a.click();
+      const url = URL.createObjectURL(blob);
+      a.href = url; a.download = 'zone-backup-' + Date.now() + '.json'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
       toast('Backup downloaded!', 'success');
     } catch (e) { toast('Export failed: ' + e.message, 'error'); }
   }
@@ -2190,42 +2332,7 @@ const ZoneApp = (() => {
     inp.click();
   }
 
-  async function syncHfUpload() {
-    toast('Uploading to HF…', 'info');
-    try {
-      const r = await fetchJSON('/api/sync/hf-upload');
-      if (!r) return;
-      if (r.changes) {
-        const parts = [];
-        if (r.changes.new) parts.push('new: ' + r.changes.new.join(', '));
-        if (r.changes.changed) parts.push('updated: ' + r.changes.changed.join(', '));
-        if (r.changes.deleted) parts.push('deleted: ' + r.changes.deleted.join(', '));
-        toast('Uploaded ✅ ' + parts.join(' | '), 'success');
-      } else {
-        toast(r.message || 'Uploaded to HF ✅', 'success');
-      }
-    } catch (e) { toast('HF upload failed: ' + e.message, 'error'); }
-  }
 
-  async function syncHfDownload() {
-    toast('Downloading from HF…', 'info');
-    try {
-      const r = await fetchJSON('/api/sync/hf-download');
-      if (!r) return;
-      if (r.changes && (r.changes.created?.length || r.changes.updated?.length || r.changes.deleted?.length)) {
-        const parts = [];
-        if (r.changes.created) parts.push('created: ' + r.changes.created.join(', '));
-        if (r.changes.updated) parts.push('updated: ' + r.changes.updated.join(', '));
-        if (r.changes.deleted) parts.push('deleted: ' + r.changes.deleted.join(', '));
-        toast('Restored ✅ ' + parts.join(' | '), 'success');
-      } else {
-        toast(r.message || 'No changes', 'success');
-      }
-      if (r.changes && (r.changes.created?.length || r.changes.updated?.length)) {
-        setTimeout(() => location.reload(), 1000);
-      }
-    } catch (e) { toast('HF download failed: ' + e.message, 'error'); }
-  }
 
   // ─── WALLPAPER TAB ──────────────────────────
   const WALLPAPER_STYLES = {
@@ -2287,7 +2394,6 @@ const ZoneApp = (() => {
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     if (state.tab !== 'console') return;
-    if (e.code === 'Space' && !state.dayComplete) { e.preventDefault(); timerToggle(); }
     if (e.code === 'KeyF') { e.preventDefault(); toggleFullscreen(); }
     if (e.code === 'Escape' && state.fullscreen) { toggleFullscreen(); }
     if (e.code === 'KeyS') { e.preventDefault(); toggleSidebar(); }
@@ -2361,10 +2467,13 @@ const ZoneApp = (() => {
     const scale = state.wpSize === 'desktop' ? 4 : 3.6;
     html2canvas(el, { scale, backgroundColor: null }).then(canvas => {
       canvas.toBlob(blob => {
+        if (!blob) { toast('Could not generate image', 'error'); return; }
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        a.href = url;
         a.download = `zone-${state.wpStyle}-${state.wpSize}.png`;
         a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
         toast('Wallpaper downloaded!', 'success');
       });
     }).catch(() => toast('Could not render wallpaper', 'error'));
@@ -2380,14 +2489,14 @@ const ZoneApp = (() => {
 
     try {
       const [cfg, tr, au] = await Promise.all([apiConfig(), apiTracks(), fetchJSON('/api/auth-check')]);
-      if (!cfg || !tr) return;
+      if (!cfg || !tr || !au) return;
       state.config = cfg; state.tracks = tr.tracks;
       state.isAdmin = au.isAdmin;
       state.username = au.username;
 
       const savedCfg = storage().get('config');
       if (savedCfg) {
-        if (savedCfg.zones) state.config.zones = savedCfg.zones;
+        if (savedCfg.zones?.length) state.config.zones = savedCfg.zones;
         if (savedCfg.identity) Object.assign(state.config.identity, savedCfg.identity);
       }
 
@@ -2432,6 +2541,7 @@ const ZoneApp = (() => {
       if (sess && sess.byZone) {
         state.byZone = sess.byZone;
         if (sess.currentZoneIdx != null) state.currentZoneIdx = sess.currentZoneIdx;
+        if (state.currentZoneIdx >= getZones().length || state.currentZoneIdx < 0) state.currentZoneIdx = 0;
         state.dayComplete = !!sess.dayComplete;
         const zs = getCurrentZs();
         if (zs && zs.running) {
@@ -2473,17 +2583,17 @@ const ZoneApp = (() => {
     markZoneComplete, resetZone, resetDay,
     continueDay, continueSkippedZone, showContinueOptions,
     toast,
-    openOnboarding, selectExamTrack, closeModal, skipOnboarding,
+    openOnboarding, selectExamTrack, confirmExamTrack, closeModal, skipOnboarding,
     showAddEvent, saveEvent, deleteEvent,
     showEditEvent, updateEvent,
     calPrev, calNext, calToday, showDayMenu,
     closeAndAddEvent, closeAndEditEvent,
     exportEvents, importEvents, exportConfig, importConfig,
     toggleSetting, clearStats, resetAll, logout,
-    syncExport, syncImport, syncHfUpload, syncHfDownload,
+    syncExport, syncImport,
     saveGoalName, editTitleInline, generateResetKey,
     changePassword, changeUsername,
-    onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone,
+    onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone, addZone,
     selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
     toggleSidebar, toggleFullscreen,
     refreshCharts, scrollToChart, showDayDetail

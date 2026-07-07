@@ -5,7 +5,7 @@
   },
   "identity": {
     "examTrack": "JEE Main & Advanced",
-    "goalName": "JEE Advanced 2026",
+    "goalName": "JEE Advanced 2027",
     "tagline": "Consistency over intensity",
     "userName": "Aspirant"
   },
@@ -20,7 +20,7 @@
       "cyclesBeforeLongBreak": 4,
       "totalCycles": 3,
       "timeLimit": 170,
-      "color": "#7C3AED",
+      "color": "#7c3aed",
       "type": "focus",
       "startTime": "06:00",
       "endTime": "08:50",
@@ -60,34 +60,13 @@
       "cyclesBeforeLongBreak": 3,
       "totalCycles": 2,
       "timeLimit": 90,
-      "color": "#D97706",
+      "color": "#d97706",
       "type": "focus",
       "startTime": "14:00",
       "endTime": "15:30",
       "cycleTitles": [
         "\ud83d\udcd6 Physics Theory",
         "\ud83d\udcd7 Chemistry Theory"
-      ]
-    },
-    {
-      "id": 5,
-      "title": "Mock Test",
-      "subtitle": "Simulated exam",
-      "focusDuration": 40,
-      "breakDuration": 5,
-      "longBreakDuration": 15,
-      "cyclesBeforeLongBreak": 4,
-      "totalCycles": 4,
-      "timeLimit": 175,
-      "color": "#DC2626",
-      "type": "focus",
-      "startTime": "16:00",
-      "endTime": "18:55",
-      "cycleTitles": [
-        "\ud83d\udcdd Section A",
-        "\ud83d\udcdd Section B",
-        "\ud83d\udcdd Section C",
-        "\ud83d\udd0d Review"
       ]
     }
   ],

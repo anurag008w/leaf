@@ -1,23 +1,17 @@
+import asyncio
 import json
 import os
 import secrets
 import time
-import asyncio
-import base64
-import hmac
-import hashlib
-import tempfile
-import shutil
 import logging
 import re
 from pathlib import Path
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from cryptography.fernet import Fernet
 import bcrypt
 
 logging.basicConfig(
@@ -32,23 +26,35 @@ STATIC_DIR = Path(__file__).parent / "static"
 DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
 ZONE_USERNAME = os.environ.get("ZONE_USERNAME", "").strip() or "admin"
 ZONE_PASSWORD = os.environ.get("ZONE_PASSWORD", "").strip()
-SYNC_HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
-SYNC_DATASET = os.environ.get("SYNC_DATASET", "").strip()
+HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
+SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
+SYNC_RESTORE = os.environ.get("SYNC_RESTORE", "true").strip().lower() in ("1", "true", "yes")
+
+_sync_task: asyncio.Task | None = None
+_sync_last_fp: str | None = None
+_sync_last_mm: tuple[int, int, int, str] | None = None
+
+if HF_TOKEN:
+    from app import sync as zone_sync
 
 _active_tokens = set()
 _token_users: dict[str, str] = {}
+_token_created: dict[str, float] = {}
 COOKIE_NAME = "zone_session"
 config_cache = {"data": None, "mtime": 0}
 USERS_FILE = DATA_DIR / "users.json"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 GUEST_PREFIX = "guest_"
-SECRET_KEY = os.environ.get("ZONE_SECRET", "").strip()
 IS_LOCAL = os.environ.get("SPACE_ID", "").strip() == ""
 
 # ── In-memory rate limiter ─────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 10     # max attempts per window
+TOKEN_EXPIRY_SECONDS = 86400 * 30  # 30 days, matching cookie max_age
+
+def rate_limit_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 def check_rate_limit(key: str) -> None:
     now = time.time()
@@ -61,6 +67,22 @@ def check_rate_limit(key: str) -> None:
         raise HTTPException(429, "too many requests — try again later")
     attempts.append(now)
 
+def invalidate_user_sessions(username: str) -> None:
+    for token, stored_uname in list(_token_users.items()):
+        if stored_uname == username:
+            _active_tokens.discard(token)
+            del _token_users[token]
+    save_sessions()
+
+def expire_stale_tokens() -> None:
+    now = time.time()
+    stale = [t for t in _active_tokens if not is_guest(t) and _token_users.get(t) and _token_created.get(t, 0) < now - TOKEN_EXPIRY_SECONDS]
+    for t in stale:
+        _active_tokens.discard(t)
+        _token_users.pop(t, None)
+        _token_created.pop(t, None)
+
+
 # ── Session persistence ────────────────────────────
 def load_sessions() -> None:
     if not SESSIONS_FILE.exists():
@@ -70,8 +92,11 @@ def load_sessions() -> None:
         for token, uname in saved.get("token_users", {}).items():
             _active_tokens.add(token)
             _token_users[token] = uname
+        for token, created in saved.get("token_created", {}).items():
+            _token_created[token] = created
         for token in saved.get("guest_tokens", []):
             _active_tokens.add(token)
+        expire_stale_tokens()
         log.info("restored %d sessions", len(_active_tokens))
     except Exception as e:
         log.warning("failed to load sessions: %s", e)
@@ -82,49 +107,16 @@ def save_sessions() -> None:
         guest_tokens = [t for t in _active_tokens if is_guest(t)]
         SESSIONS_FILE.write_text(json.dumps({
             "token_users": _token_users,
+            "token_created": _token_created,
             "guest_tokens": guest_tokens,
         }, indent=2))
     except Exception as e:
         log.warning("failed to save sessions: %s", e)
 
-# ── Encryption ─────────────────────────────────────
-def get_secret() -> bytes:
-    global SECRET_KEY
-    if SECRET_KEY:
-        return SECRET_KEY.encode()
-    sk = DATA_DIR / "secret.key"
-    if sk.exists():
-        SECRET_KEY = sk.read_text().strip()
-    else:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        SECRET_KEY = secrets.token_hex(32)
-        sk.write_text(SECRET_KEY)
-    return SECRET_KEY.encode()
-
-def user_fernet(username: str) -> Fernet:
-    key = base64.urlsafe_b64encode(
-        hmac.new(get_secret(), username.encode(), hashlib.sha256).digest()
-    )
-    return Fernet(key)
-
-def encrypt_write(p: Path, data, username: str) -> None:
-    p.parent.mkdir(parents=True, exist_ok=True)
-    plain = json.dumps(data, indent=2).encode()
-    encrypted = user_fernet(username).encrypt(plain)
-    p.write_bytes(encrypted)
-
-def decrypt_read(p: Path, username: str):
-    if not p.exists():
-        return {}
-    try:
-        raw = p.read_bytes()
-        plain = user_fernet(username).decrypt(raw)
-        return json.loads(plain)
-    except Exception:
-        return {}
-
 # ── Config ─────────────────────────────────────────
 def load_config():
+    if not CONFIG_PATH.exists():
+        return {"identity": {}, "zones": []}
     mtime = CONFIG_PATH.stat().st_mtime
     if config_cache["mtime"] != mtime:
         with open(CONFIG_PATH) as f:
@@ -160,7 +152,14 @@ def user_dir(username: str) -> Path:
 
 def _read_json(p: Path) -> dict:
     if p.exists():
-        return json.loads(p.read_text())
+        try:
+            raw = p.read_text()
+            if not raw.strip():
+                return {}
+            return json.loads(raw)
+        except (json.JSONDecodeError, OSError):
+            log.warning("corrupted json file: %s", p)
+            return {}
     return {}
 
 def _write_json(p: Path, data) -> None:
@@ -172,34 +171,18 @@ def resolve_username(token: str) -> str | None:
         return None
     return _token_users.get(token)
 
-USER_DATA_KEYS = ("stats", "tracking", "events", "settings", "session")
+USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session"})
 
 def read_user_data(uname: str) -> dict:
+    if not uname:
+        return {}
     d = user_dir(uname)
     out = {}
     for k in USER_DATA_KEYS:
         p = d / f"{k}.json"
         if p.exists():
-            if is_encrypted(uname):
-                out[k] = decrypt_read(p, uname)
-            else:
-                out[k] = _read_json(p)
+            out[k] = _read_json(p)
     return out
-
-def write_user_data(uname: str, key: str, value) -> None:
-    if key not in USER_DATA_KEYS:
-        return
-    p = user_dir(uname) / f"{key}.json"
-    if is_encrypted(uname):
-        encrypt_write(p, value, uname)
-    else:
-        _write_json(p, value)
-
-def is_encrypted(uname: str) -> bool:
-    return (user_dir(uname) / ".encrypted").exists()
-
-def mark_encrypted(uname: str) -> None:
-    (user_dir(uname) / ".encrypted").write_text("1")
 
 # ── Pydantic models ────────────────────────────────
 class LoginBody(BaseModel):
@@ -238,6 +221,7 @@ def make_session(username: str) -> str:
     token = secrets.token_hex(32)
     _active_tokens.add(token)
     _token_users[token] = username
+    _token_created[token] = time.time()
     save_sessions()
     return token
 
@@ -248,48 +232,49 @@ def ensure_user_dir(uname: str):
     if not cfg_file.exists():
         _write_json(cfg_file, load_config())
 
-def migrate_to_encrypted(uname: str):
-    if is_encrypted(uname):
-        return
-    u_dir = user_dir(uname)
-    for k in USER_DATA_KEYS:
-        p = u_dir / f"{k}.json"
-        if p.exists():
-            try:
-                data = _read_json(p)
-                encrypt_write(p, data, uname)
-            except Exception:
-                pass
-    mark_encrypted(uname)
-
 # ── Lifespan ───────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
     load_config()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     load_sessions()
-    if not SECRET_KEY:
-        get_secret()
-        log.warning(
-            "ZONE_SECRET is not set. Generated key saved to %s/secret.key. "
-            "If that path isn't persistent, data will become undecryptable on restart.",
-            DATA_DIR,
-        )
     if not ZONE_PASSWORD:
         log.warning("ZONE_PASSWORD is not set — signup still works, but admin login is disabled")
-    if not SYNC_HF_TOKEN:
-        log.info("HF_TOKEN not set — HF sync disabled")
-    else:
-        ds = SYNC_DATASET or "<auto>"
-        log.info("HF sync configured — dataset: %s", ds)
-        asyncio.create_task(auto_sync_loop())
+
+    if HF_TOKEN and SYNC_RESTORE and not USERS_FILE.exists():
+        try:
+            await asyncio.to_thread(zone_sync.restore)
+        except Exception as exc:
+            log.warning("HF restore failed: %s", exc)
+
+    if HF_TOKEN:
+        global _sync_task, _sync_last_fp, _sync_last_mm
+        _sync_task = asyncio.create_task(_sync_loop())
 
     yield
 
-    # shutdown
+    if HF_TOKEN:
+        _sync_task.cancel()
+        try:
+            await _sync_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            _sync_last_fp, _sync_last_mm = await asyncio.to_thread(zone_sync.sync_once, _sync_last_fp, _sync_last_mm)
+        except Exception as exc:
+            log.warning("final sync failed: %s", exc)
     save_sessions()
     log.info("sessions saved, shutting down")
+
+async def _sync_loop():
+    global _sync_last_fp, _sync_last_mm
+    await asyncio.sleep(30)
+    while True:
+        try:
+            _sync_last_fp, _sync_last_mm = await asyncio.to_thread(zone_sync.sync_once, _sync_last_fp, _sync_last_mm)
+        except Exception as exc:
+            log.warning("sync failed: %s", exc)
+        await asyncio.sleep(SYNC_INTERVAL)
 
 # ── App creation ──────────────────────────────────
 app = FastAPI(title="Zone Study OS", version="1.0.0", lifespan=lifespan)
@@ -312,14 +297,20 @@ async def auth_middleware(request: Request, call_next):
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
-        # api subroutes that aren't in exempt
-        if not any(path.startswith(p) for p in ("/api/login", "/api/guest-login", "/api/signup", "/api/reset-password")):
-            token = request.cookies.get(COOKIE_NAME, "")
-            if not token or token not in _active_tokens:
-                return JSONResponse({"error": "unauthorized"}, 401)
-            request.state.token = token
-            request.state.username = resolve_username(token)
+        if path in ("/api/login", "/api/guest-login", "/api/signup", "/api/reset-password"):
             return await call_next(request)
+        token = request.cookies.get(COOKIE_NAME, "")
+        if not token or token not in _active_tokens:
+            return JSONResponse({"error": "unauthorized"}, 401)
+        if not is_guest(token) and _token_created.get(token, 0) < time.time() - TOKEN_EXPIRY_SECONDS:
+            _active_tokens.discard(token)
+            _token_users.pop(token, None)
+            _token_created.pop(token, None)
+            save_sessions()
+            return JSONResponse({"error": "session expired"}, 401)
+        request.state.token = token
+        request.state.username = resolve_username(token)
+        return await call_next(request)
     else:
         token = request.cookies.get(COOKIE_NAME, "")
         if token and token in _active_tokens:
@@ -334,8 +325,8 @@ async def auth_middleware(request: Request, call_next):
 
 # ── Auth endpoints ────────────────────────────────
 @app.post("/api/signup")
-async def signup(body: SignupBody):
-    check_rate_limit(body.username.strip())
+async def signup(body: SignupBody, request: Request):
+    check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
     if not uname or len(uname) < 2:
         raise HTTPException(400, "username too short")
@@ -343,13 +334,14 @@ async def signup(body: SignupBody):
         raise HTTPException(400, "username can only contain letters, numbers, hyphens and underscores")
     if not body.password or len(body.password) < 3:
         raise HTTPException(400, "password too short")
+    if uname == ZONE_USERNAME:
+        raise HTTPException(409, "username taken")
     users = load_users()
     if uname in users:
         raise HTTPException(409, "username taken")
+    ensure_user_dir(uname)
     users[uname] = hash_password(body.password)
     save_users(users)
-    ensure_user_dir(uname)
-    mark_encrypted(uname)
     token = make_session(uname)
     resp = JSONResponse({"token": token, "username": uname})
     make_secure_cookie(resp, token)
@@ -357,13 +349,12 @@ async def signup(body: SignupBody):
     return resp
 
 @app.post("/api/login")
-async def login(body: LoginBody):
-    check_rate_limit(body.username.strip())
+async def login(body: LoginBody, request: Request):
+    check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
     if ZONE_PASSWORD and uname == ZONE_USERNAME and body.password == ZONE_PASSWORD:
         ensure_user_dir(uname)
         token = make_session(uname)
-        migrate_to_encrypted(uname)
         resp = JSONResponse({"token": token, "username": uname})
         make_secure_cookie(resp, token)
         log.info("admin login: %s", uname)
@@ -372,7 +363,6 @@ async def login(body: LoginBody):
     if uname in users and check_password(body.password, users[uname]):
         ensure_user_dir(uname)
         token = make_session(uname)
-        migrate_to_encrypted(uname)
         resp = JSONResponse({"token": token, "username": uname})
         make_secure_cookie(resp, token)
         log.info("user login: %s", uname)
@@ -380,7 +370,8 @@ async def login(body: LoginBody):
     raise HTTPException(401, "invalid credentials")
 
 @app.get("/api/guest-login")
-async def guest_login():
+async def guest_login(request: Request):
+    check_rate_limit(rate_limit_key(request))
     token = GUEST_PREFIX + secrets.token_hex(16)
     _active_tokens.add(token)
     save_sessions()
@@ -393,20 +384,25 @@ async def logout(request: Request):
     token = request.cookies.get(COOKIE_NAME, "")
     _active_tokens.discard(token)
     _token_users.pop(token, None)
+    _token_created.pop(token, None)
     save_sessions()
     resp = JSONResponse({"status": "ok"})
     resp.set_cookie(COOKIE_NAME, "", max_age=0)
     return resp
 
 @app.post("/api/reset-password")
-async def reset_password(body: ResetPasswordBody):
-    check_rate_limit("reset-password")
+async def reset_password(body: ResetPasswordBody, request: Request):
+    check_rate_limit(rate_limit_key(request))
     if not ZONE_PASSWORD:
         raise HTTPException(400, "no auth configured")
     keys = load_reset_keys()
-    valid = body.admin_password == ZONE_PASSWORD or body.admin_password in keys
+    key_used = body.admin_password in keys
+    valid = body.admin_password == ZONE_PASSWORD or key_used
     if not valid:
         raise HTTPException(403, "invalid admin password")
+    if key_used:
+        keys.remove(body.admin_password)
+        save_reset_keys(keys)
     uname = body.username.strip()
     users = load_users()
     if uname not in users:
@@ -415,6 +411,7 @@ async def reset_password(body: ResetPasswordBody):
         raise HTTPException(400, "new password too short")
     users[uname] = hash_password(body.new_password)
     save_users(users)
+    invalidate_user_sessions(uname)
     log.info("password reset for: %s", uname)
     return {"status": "ok", "message": "password reset for " + uname}
 
@@ -433,7 +430,8 @@ async def generate_reset_key(request: Request):
 async def auth_check(request: Request):
     token = getattr(request.state, "token", "")
     uname = getattr(request.state, "username", None)
-    return {"authed": True, "guest": is_guest(token), "username": uname, "isAdmin": uname == ZONE_USERNAME}
+    guest = is_guest(token)
+    return {"authed": not guest, "guest": guest, "username": uname, "isAdmin": uname == ZONE_USERNAME}
 
 class ChangePasswordBody(BaseModel):
     current_password: str
@@ -441,6 +439,7 @@ class ChangePasswordBody(BaseModel):
 
 @app.post("/api/change-password")
 async def change_password(body: ChangePasswordBody, request: Request):
+    check_rate_limit(rate_limit_key(request))
     uname = getattr(request.state, "username", None)
     if not uname:
         raise HTTPException(401, "not authenticated")
@@ -453,8 +452,12 @@ async def change_password(body: ChangePasswordBody, request: Request):
         raise HTTPException(400, "new password too short")
     users[uname] = hash_password(body.new_password)
     save_users(users)
+    invalidate_user_sessions(uname)
+    new_token = make_session(uname)
+    resp = JSONResponse({"status": "ok", "token": new_token})
+    make_secure_cookie(resp, new_token)
     log.info("password changed for: %s", uname)
-    return {"status": "ok"}
+    return resp
 
 class ChangeUsernameBody(BaseModel):
     new_username: str
@@ -471,16 +474,26 @@ async def change_username(body: ChangeUsernameBody, request: Request):
         raise HTTPException(400, "username can only contain letters, numbers, hyphens and underscores")
     if new_name == uname:
         return {"status": "ok", "username": uname}
+    if uname == ZONE_USERNAME:
+        raise HTTPException(400, "admin username cannot be changed")
     users = load_users()
     if new_name in users:
         raise HTTPException(409, "username taken")
-    users[new_name] = users.pop(uname)
-    save_users(users)
+    if new_name == ZONE_USERNAME:
+        raise HTTPException(409, "username taken")
     old_dir = user_dir(uname)
     new_dir = user_dir(new_name)
+    if new_dir.exists():
+        raise HTTPException(409, "target data directory already exists")
     if old_dir.exists():
-        old_dir.rename(new_dir)
-    # Update all active sessions for this user
+        try:
+            old_dir.rename(new_dir)
+        except OSError:
+            raise HTTPException(500, "Failed to rename user data directory. Please try again in a few minutes.")
+    else:
+        ensure_user_dir(new_name)
+    users[new_name] = users.pop(uname)
+    save_users(users)
     for token, stored_uname in list(_token_users.items()):
         if stored_uname == uname:
             _token_users[token] = new_name
@@ -521,15 +534,13 @@ async def get_config(request: Request):
 
 @app.put("/api/config")
 async def update_config(data: dict, request: Request):
+    if not data or not isinstance(data, dict):
+        raise HTTPException(400, "config must be a non-empty object")
     uname = getattr(request.state, "username", None)
     if uname:
         _write_json(user_dir(uname) / "config.json", data)
-        config_cache["mtime"] = 0
         return {"status": "saved"}
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(data, f, indent=2)
-    config_cache["mtime"] = 0
-    return {"status": "saved"}
+    return {"status": "saved", "guest": True}
 
 # ── User data API ─────────────────────────────────
 @app.get("/api/user-data")
@@ -548,6 +559,8 @@ async def save_user_data(body: UserDataBody, request: Request):
     uname = getattr(request.state, "username", None)
     if not uname:
         return {"status": "ok", "guest": True}
+    if body.key not in USER_DATA_KEYS:
+        raise HTTPException(400, f"invalid key '{body.key}', must be one of {sorted(USER_DATA_KEYS)}")
     write_user_data(uname, body.key, body.value)
     return {"status": "ok"}
 
@@ -609,6 +622,24 @@ async def get_exam_tracks():
     return {"tracks": TRACKS}
 
 # ── Backup / sync ─────────────────────────────────
+@app.post("/api/sync/trigger")
+async def sync_trigger(request: Request):
+    global _sync_last_fp, _sync_last_mm
+    if not HF_TOKEN:
+        raise HTTPException(400, "HF_TOKEN not configured")
+    try:
+        fp, mm = await asyncio.to_thread(zone_sync.sync_once, _sync_last_fp, _sync_last_mm)
+        _sync_last_fp, _sync_last_mm = fp, mm
+        return {"status": "ok"}
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+@app.get("/api/sync/status")
+async def sync_status():
+    if not HF_TOKEN:
+        return {"enabled": False}
+    return {"enabled": True, "interval": SYNC_INTERVAL}
+
 @app.get("/api/sync/export")
 async def sync_export(request: Request):
     uname = getattr(request.state, "username", None)
@@ -646,237 +677,6 @@ async def sync_import(body: SyncImportBody, request: Request):
             except Exception as e:
                 errors.append(f"{key}: {e}")
     return {"status": "ok", "errors": errors}
-
-# ── HF Sync ──────────────────────────────────────
-SYNC_STATE_FILE = "sync-state.json"
-SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
-SYNC_RETRIES = 3
-SYNC_BACKOFF = [5, 15, 30]
-
-_hf_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_hf_rid_cache: str | None = None
-_hf_rid_cache_ts: float = 0
-HF_API_TIMEOUT = 30
-
-def sync_state_path(uname: str) -> Path:
-    return user_dir(uname) / SYNC_STATE_FILE
-
-def load_sync_state(uname: str) -> dict:
-    p = sync_state_path(uname)
-    if p.exists():
-        return json.loads(p.read_text())
-    return {}
-
-def save_sync_state(uname: str, state: dict) -> None:
-    p = sync_state_path(uname)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
-    tmp.replace(p)
-
-def file_hash(p: Path) -> str:
-    return hashlib.md5(p.read_bytes()).hexdigest()
-
-def detect_changes(uname: str) -> tuple:
-    current = {}
-    state = load_sync_state(uname)
-    u_dir = user_dir(uname)
-    new_f, changed_f, deleted_f = [], [], []
-    for key in USER_DATA_KEYS:
-        p = u_dir / f"{key}.json"
-        if p.exists():
-            h = file_hash(p)
-            current[key] = h
-            if key not in state:
-                new_f.append(key)
-            elif state[key] != h:
-                changed_f.append(key)
-    for key in state:
-        if key not in current:
-            deleted_f.append(key)
-    changes = {}
-    if new_f: changes["new"] = new_f
-    if changed_f: changes["changed"] = changed_f
-    if deleted_f: changes["deleted"] = deleted_f
-    return changes, current
-
-async def _hf_call(func, *args, **kwargs) -> any:
-    from huggingface_hub import HfApi
-    kwargs.setdefault("token", SYNC_HF_TOKEN)
-    last_err = None
-    for attempt in range(SYNC_RETRIES):
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(func, *args, **kwargs),
-                timeout=HF_API_TIMEOUT,
-            )
-        except Exception as e:
-            last_err = e
-            if attempt < SYNC_RETRIES - 1:
-                backoff = SYNC_BACKOFF[attempt]
-                log.warning("HF call failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, SYNC_RETRIES, e, backoff)
-                await asyncio.sleep(backoff)
-    raise last_err  # type: ignore
-
-async def get_hf_rid() -> str:
-    global _hf_rid_cache, _hf_rid_cache_ts
-    now = time.time()
-    if _hf_rid_cache and now - _hf_rid_cache_ts < 300:
-        return _hf_rid_cache
-    from huggingface_hub import HfApi
-    api = HfApi(token=SYNC_HF_TOKEN)
-    me = await asyncio.to_thread(api.whoami)
-    ds_name = SYNC_DATASET or f"{me['name']}/zone-study-os-data"
-    _hf_rid_cache = ds_name
-    _hf_rid_cache_ts = now
-    return _hf_rid_cache
-
-async def ensure_hf_dataset(api, rid: str) -> None:
-    from huggingface_hub import HfApi
-    try:
-        await asyncio.to_thread(api.repo_info, repo_id=rid, repo_type="dataset")
-    except Exception as e:
-        if "404" in str(e) or "Not Found" in str(e):
-            await asyncio.to_thread(api.create_repo, repo_id=rid, repo_type="dataset", private=True, token=SYNC_HF_TOKEN)
-            log.info("created HF dataset: %s", rid)
-        else:
-            log.warning("HF dataset check failed (will retry): %s", e)
-            raise
-
-async def auto_sync_loop():
-    while True:
-        await asyncio.sleep(SYNC_INTERVAL)
-        if not SYNC_HF_TOKEN:
-            continue
-        try:
-            users = load_users()
-        except Exception as e:
-            log.warning("auto-sync: failed to load users: %s", e)
-            continue
-        for uname in users:
-            try:
-                async with _hf_locks[uname]:
-                    changes, _ = detect_changes(uname)
-                    if changes:
-                        await sync_user_to_hf(uname, changes)
-            except Exception as e:
-                log.warning("auto-sync failed for %s: %s", uname, e)
-
-async def sync_user_to_hf(uname: str, changes: dict | None = None):
-    if changes is None:
-        changes, _ = detect_changes(uname)
-    if not changes:
-        return
-    from huggingface_hub import HfApi
-    api = HfApi(token=SYNC_HF_TOKEN)
-    rid = await get_hf_rid()
-    await ensure_hf_dataset(api, rid)
-    u_dir = user_dir(uname)
-    for key in changes.get("new", []) + changes.get("changed", []):
-        p = u_dir / f"{key}.json"
-        if p.exists():
-            await _hf_call(api.upload_file, path_or_fileobj=p.read_bytes(), path_in_repo=f"{uname}/{key}.json", repo_id=rid, repo_type="dataset")
-    for key in changes.get("deleted", []):
-        try:
-            await _hf_call(api.delete_file, path_in_repo=f"{uname}/{key}.json", repo_id=rid, repo_type="dataset")
-        except Exception as e:
-            log.warning("failed to delete %s/%s from HF: %s", uname, key, e)
-    cfg_p = u_dir / "config.json"
-    if cfg_p.exists():
-        cfg_hash = file_hash(cfg_p)
-        state = load_sync_state(uname)
-        if state.get("config") != cfg_hash:
-            await _hf_call(api.upload_file, path_or_fileobj=cfg_p.read_bytes(), path_in_repo=f"{uname}/config.json", repo_id=rid, repo_type="dataset")
-    save_sync_state(uname, {**load_sync_state(uname), **{k: file_hash(u_dir / f"{k}.json") for k in changes.get("new", []) + changes.get("changed", []) if (u_dir / f"{k}.json").exists()}})
-    log.info("synced %s to HF: %s", uname, json.dumps(changes))
-
-async def sync_user_from_hf(uname: str) -> dict:
-    from huggingface_hub import HfApi, snapshot_download
-    api = HfApi(token=SYNC_HF_TOKEN)
-    rid = await get_hf_rid()
-    tmp = Path(tempfile.mkdtemp(prefix="zone-restore-"))
-    changes = {"created": [], "updated": [], "deleted": []}
-    try:
-        snapshot_download(
-            repo_id=rid, repo_type="dataset",
-            local_dir=str(tmp), token=SYNC_HF_TOKEN,
-            allow_patterns=f"{uname}/*",
-        )
-        remote_dir = tmp / uname
-        if not remote_dir.exists() or not any(remote_dir.iterdir()):
-            log.info("no remote data found for %s — skipping restore", uname)
-            shutil.rmtree(tmp, ignore_errors=True)
-            return changes
-        remote_files = list(remote_dir.iterdir())
-        remote_keys = set()
-        for rf in remote_files:
-            stem = rf.stem
-            remote_keys.add(stem)
-            raw = rf.read_bytes()
-            if stem != "config" and is_encrypted(uname):
-                try:
-                    plain = user_fernet(uname).decrypt(raw)
-                    data = json.loads(plain)
-                except Exception:
-                    raise RuntimeError(
-                        f"Could not decrypt remote '{stem}' for user '{uname}'. "
-                        "This usually means ZONE_SECRET changed since this backup was created."
-                    )
-            else:
-                data = json.loads(raw)
-            if stem == "config":
-                local_p = user_dir(uname) / "config.json"
-                local_existed = local_p.exists()
-                if not local_existed or local_p.read_bytes() != raw:
-                    _write_json(local_p, data)
-                    changes["created" if not local_existed else "updated"].append(stem)
-            elif stem in USER_DATA_KEYS:
-                local_p = user_dir(uname) / f"{stem}.json"
-                local_exists = local_p.exists()
-                write_user_data(uname, stem, data)
-                changes["created" if not local_exists else "updated"].append(stem)
-        shutil.rmtree(tmp, ignore_errors=True)
-        log.info("restored %s from HF: %s", uname, json.dumps(changes))
-        return changes
-    except Exception:
-        shutil.rmtree(tmp, ignore_errors=True)
-        raise
-
-@app.get("/api/sync/hf-upload")
-async def sync_hf_upload(request: Request):
-    if not SYNC_HF_TOKEN:
-        raise HTTPException(400, "HF_TOKEN env var required")
-    try:
-        uname = getattr(request.state, "username", None)
-        if not uname:
-            raise HTTPException(400, "login required")
-        async with _hf_locks[uname]:
-            changes, _ = detect_changes(uname)
-            if not changes:
-                return {"status": "ok", "message": "no changes detected"}
-            await sync_user_to_hf(uname, changes)
-            return {"status": "ok", "changes": changes}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.get("/api/sync/hf-download")
-async def sync_hf_download(request: Request):
-    if not SYNC_HF_TOKEN:
-        raise HTTPException(400, "HF_TOKEN env var required")
-    try:
-        uname = getattr(request.state, "username", None)
-        if not uname:
-            raise HTTPException(400, "login required")
-        async with _hf_locks[uname]:
-            changes = await sync_user_from_hf(uname)
-            if any(changes.values()):
-                return {"status": "ok", "changes": changes}
-            return {"status": "ok", "message": "no changes on remote"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 # ── Static files ──────────────────────────────────
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
