@@ -18,6 +18,7 @@ const ZoneApp = (() => {
     tracking: { log: [], zoneStats: {}, sessionCount: 0 },
     settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true },
     examTrack: null,
+    examDates: [],
     wpStyle: 'mission_control', wpSize: 'mobile',
     audioCtx: null, timerHandle: null, notifAsked: false
   };
@@ -119,6 +120,32 @@ const ZoneApp = (() => {
 
   function isGuest() { return !!localStorage.getItem('zone_guest'); }
 
+  const EXAM_DATES_BY_TRACK = {
+    JEE: [
+      { id: 'jee_main', name: 'JEE Main 2026', defaultDate: '2026-04-01', icon: '📝' },
+      { id: 'jee_adv', name: 'JEE Advanced 2026', defaultDate: '2026-05-17', icon: '🎯' }
+    ],
+    NEET: [
+      { id: 'neet', name: 'NEET UG 2026', defaultDate: '2026-05-03', icon: '⚕️' }
+    ],
+    UPSC: [
+      { id: 'upsc_pre', name: 'UPSC Prelims 2026', defaultDate: '2026-06-14', icon: '📋' },
+      { id: 'upsc_main', name: 'UPSC Mains 2026', defaultDate: '2026-09-20', icon: '📚' }
+    ],
+    GATE: [
+      { id: 'gate', name: 'GATE 2026', defaultDate: '2026-02-07', icon: '⚙️' }
+    ],
+    CA: [
+      { id: 'ca', name: 'CA Exams 2026', defaultDate: '2026-05-15', icon: '📊' }
+    ],
+    BOARDS: [
+      { id: 'boards', name: 'Board Exams 2026', defaultDate: '2026-03-01', icon: '🏫' }
+    ],
+    CUSTOM: [
+      { id: 'custom', name: 'Target Date 2026', defaultDate: '2026-06-01', icon: '🎯' }
+    ]
+  };
+
   function storage() {
     const pre = isGuest() ? 'zg:' : 'zu:';
     function tryGet(k) {
@@ -181,6 +208,7 @@ const ZoneApp = (() => {
     storage().set('tracking', state.tracking);
     storage().set('settings', state.settings);
     storage().set('examTrack', state.examTrack);
+    storage().set('examDates', state.examDates);
     if (isGuest()) return;
     const now = Date.now();
     if (now - _lastHttpSave < 5000) {
@@ -750,6 +778,7 @@ const ZoneApp = (() => {
         <button class="tab-btn ${state.tab === 'wallpapers' ? 'active' : ''}" onclick="ZoneApp.switchTab('wallpapers')">WALLPAPERS</button>
         <button class="tab-btn ${state.tab === 'calendar' ? 'active' : ''}" onclick="ZoneApp.switchTab('calendar')">CALENDAR</button>
         <button class="tab-btn ${state.tab === 'stats' ? 'active' : ''}" onclick="ZoneApp.switchTab('stats')">STATS</button>
+        <button class="tab-btn ${state.tab === 'exam-timer' ? 'active' : ''}" onclick="ZoneApp.switchTab('exam-timer')">EXAM TIMER</button>
         <button class="tab-btn ${state.tab === 'settings' ? 'active' : ''}" onclick="ZoneApp.switchTab('settings')">SETTINGS</button>
       </div>
 
@@ -760,7 +789,20 @@ const ZoneApp = (() => {
     tickClock();
   }
 
-  function switchTab(tab) { state.tab = tab; render(); }
+  function switchTab(tab) {
+    state.tab = tab;
+    if (tab === 'exam-timer') {
+      if (state._examTimerInterval) clearInterval(state._examTimerInterval);
+      state._examTimerInterval = setInterval(() => {
+        const el = document.querySelector('.exam-timer-wrap');
+        if (el) renderTabBody();
+        else { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
+      }, 1000);
+    } else {
+      if (state._examTimerInterval) { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
+    }
+    render();
+  }
 
   function renderTabBody() {
     switch (state.tab) {
@@ -768,6 +810,7 @@ const ZoneApp = (() => {
       case 'wallpapers': renderWallpaperTab(); break;
       case 'calendar': renderCalendarTab(); break;
       case 'stats': renderStatsTab(); break;
+      case 'exam-timer': renderExamTimerTab(); break;
       case 'settings': renderSettingsTab(); break;
     }
   }
@@ -1974,6 +2017,106 @@ const ZoneApp = (() => {
 
   function refreshCharts() { renderStatsTab(); }
 
+  // ─── EXAM TIMER TAB ─────────────────────────
+  function getExamDates() {
+    const trackId = state.tracks?.find(t => t.name === state.examTrack)?.id;
+    const defaults = EXAM_DATES_BY_TRACK[trackId] || EXAM_DATES_BY_TRACK.CUSTOM;
+    const userDates = state.examDates || [];
+    return defaults.map(d => {
+      const user = userDates.find(u => u.id === d.id);
+      return { ...d, date: user?.date || d.defaultDate };
+    });
+  }
+
+  function renderExamTimerTab() {
+    const body = document.getElementById('tabBody');
+    const exams = getExamDates();
+    const now = new Date();
+
+    body.innerHTML = `
+      <div class="exam-timer-wrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px">
+          <h2 style="font-size:20px;font-weight:700">⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
+          <button class="ctl" onclick="ZoneApp.openExamDateEditor()" style="padding:6px 14px;font-size:11px">✏️ Edit Dates</button>
+        </div>
+        <div class="exam-grid">
+          ${exams.map(e => {
+            const target = new Date(e.date + 'T23:59:59');
+            const diff = target - now;
+            const totalDays = Math.max(0, Math.ceil(diff / 86400000));
+            const totalHours = Math.max(0, Math.floor(diff / 3600000));
+            const days = Math.floor(totalDays);
+            const hours = Math.floor((diff % 86400000) / 3600000);
+            const mins = Math.floor((diff % 3600000) / 60000);
+            const secs = Math.floor((diff % 60000) / 1000);
+            const expired = diff <= 0;
+            return `<div class="exam-card ${expired ? 'expired' : ''}">
+              <div class="exam-card-head">
+                <span class="exam-icon">${e.icon}</span>
+                <span class="exam-name">${esc(e.name)}</span>
+                <span class="exam-date">${e.date}</span>
+              </div>
+              <div class="exam-countdown">
+                ${expired ? '<div class="exam-expired">🎉 Exam Date Reached</div>'
+                : `
+                  <div class="exam-unit"><span class="exam-num">${String(days).padStart(2,'0')}</span><span class="exam-lbl">Days</span></div>
+                  <span class="exam-sep">:</span>
+                  <div class="exam-unit"><span class="exam-num">${String(hours).padStart(2,'0')}</span><span class="exam-lbl">Hours</span></div>
+                  <span class="exam-sep">:</span>
+                  <div class="exam-unit"><span class="exam-num">${String(mins).padStart(2,'0')}</span><span class="exam-lbl">Mins</span></div>
+                  <span class="exam-sep">:</span>
+                  <div class="exam-unit"><span class="exam-num">${String(secs).padStart(2,'0')}</span><span class="exam-lbl">Secs</span></div>
+                `}
+              </div>
+              ${!expired ? `<div class="exam-total">${totalDays} days remaining</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+        <div style="margin-top:20px;font-size:11px;color:var(--text-muted);text-align:center">
+          ${state.examTrack ? 'Dates auto-configured for ' + esc(state.examTrack) + '. Click "Edit Dates" to customize.' : 'Select an exam track in Settings to see countdown.'}
+        </div>
+      </div>`;
+  }
+
+  function openExamDateEditor() {
+    const exams = getExamDates();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <h3>✏️ Edit Exam Dates</h3>
+        <button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="gap:12px">
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Adjust target dates for your exams.</p>
+        ${exams.map((e, i) => `
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:16px">${e.icon}</span>
+            <span style="font-size:13px;font-weight:500;min-width:120px">${esc(e.name)}</span>
+            <input type="date" id="ed-${i}" value="${e.date}"
+              style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);font-size:13px;outline:none">
+          </div>
+        `).join('')}
+        <button class="ctl primary" style="width:100%;margin-top:8px" onclick="ZoneApp.saveExamDates()">Save Dates</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  function saveExamDates() {
+    const exams = getExamDates();
+    const dates = exams.map((e, i) => ({
+      id: e.id,
+      date: document.getElementById('ed-' + i)?.value || e.defaultDate
+    }));
+    state.examDates = dates;
+    storage().set('examDates', dates);
+    const ov = document.querySelector('.modal-overlay');
+    if (ov) ov.remove();
+    renderTabBody();
+    toast('Exam dates saved', 'success');
+  }
+
   // ─── SETTINGS TAB ───────────────────────────
   function renderSettingsTab() {
     const body = document.getElementById('tabBody');
@@ -2718,6 +2861,9 @@ const ZoneApp = (() => {
     const savedExam = storage().get('examTrack');
     if (savedExam) state.examTrack = savedExam;
 
+    const savedExamDates = storage().get('examDates');
+    if (savedExamDates) state.examDates = savedExamDates;
+
     // load server-side session as fallback (for when localStorage is cleared)
     if (!isGuest() && !loadSession()) {
       try {
@@ -2790,7 +2936,8 @@ const ZoneApp = (() => {
     onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone, addZone,
     selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
     toggleSidebar, toggleFullscreen,
-    refreshCharts, scrollToChart, showDayDetail
+    refreshCharts, scrollToChart, showDayDetail,
+    openExamDateEditor, saveExamDates
   };
 })();
 
