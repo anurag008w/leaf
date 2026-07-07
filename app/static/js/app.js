@@ -470,7 +470,6 @@ const ZoneApp = (() => {
     if (zs.remaining < 300 && zs.remaining % 60 === 0) chime('tick');
     saveState();
     updateTimerDisplay();
-    const z = getZone(state.currentZoneIdx);
     document.title = `${fmtTime(zs.remaining)} — ${z ? z.title : 'Zone'} — Study OS`;
   }
 
