@@ -8,13 +8,10 @@ const ZoneApp = (() => {
   const state = {
     config: null, tracks: null,
     tab: 'console', // console | wallpapers
-    currentZoneIdx: 0, cycle: 0, blockIdx: 0,
-    remaining: 0, total: 0,
-    running: false, completed: false,
-    blockDone: [],
+    currentZoneIdx: 0,
     byZone: {},
     dayComplete: false,
-    theme: 'dark', onboarded: false,
+    onboarded: false,
     sidebarOpen: true, fullscreen: false,
     events: [],
     stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
@@ -35,11 +32,6 @@ const ZoneApp = (() => {
     return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   }
 
-  function hexToRgb(h, a = 1) {
-    const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
-    return `rgba(${r},${g},${b},${a})`;
-  }
-
   function to12h(t) {
     if (!t) return '→ open';
     const [h, m] = t.split(':').map(Number);
@@ -49,8 +41,6 @@ const ZoneApp = (() => {
   }
 
   function todayKey() { return new Date().toISOString().slice(0,10); }
-
-  const ICONS = { calendar: '📅', settings: '⚙️', stats: '📊', console: '🎯', wallpaper: '🖼' };
 
   let defaultEventsCache = null;
   let defaultEventsYear = null;
@@ -131,25 +121,30 @@ const ZoneApp = (() => {
 
   function storage() {
     const pre = isGuest() ? 'zg:' : 'zu:';
-    try {
-      return {
-        get: k => {
-          let v = localStorage.getItem(pre + k);
-          if (v === null && pre === 'zu:') v = localStorage.getItem('zone:' + k); // migrate old key
-          return v ? JSON.parse(v) : null;
-        },
-        set: (k, v) => localStorage.setItem(pre + k, JSON.stringify(v)),
-        remove: k => { localStorage.removeItem(pre + k); localStorage.removeItem('zone:' + k); }
-      };
-    } catch { return { get: () => null, set: () => {}, remove: () => {} }; }
+    function tryGet(k) {
+      try {
+        let v = localStorage.getItem(pre + k);
+        if (v === null) v = localStorage.getItem('zone:' + k);
+        if (v === null) v = localStorage.getItem((pre === 'zg:' ? 'zu:' : 'zg:') + k);
+        return v ? JSON.parse(v) : null;
+      } catch { return null; }
+    }
+    function trySet(k, v) {
+      try { localStorage.setItem(pre + k, JSON.stringify(v)); return true; } catch { return false; }
+    }
+    function tryRemove(k) {
+      try { localStorage.removeItem(pre + k); localStorage.removeItem('zone:' + k); } catch {}
+    }
+    return { get: tryGet, set: trySet, remove: tryRemove };
   }
 
-  async function saveUserDataToServer(key) {
+  async function saveUserDataToServer(key, val) {
     if (isGuest()) return;
     try {
+      const data = val !== undefined ? val : state[key];
       await fetchJSON('/api/user-data', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ key, value: state[key] })
+        body: JSON.stringify({ key, value: data })
       });
     } catch {}
   }
@@ -160,6 +155,7 @@ const ZoneApp = (() => {
       byZone: state.byZone,
       dayComplete: state.dayComplete
     };
+    storage().set('onboarded', state.onboarded);
     storage().set('session', session);
     storage().set('events', state.events);
     storage().set('stats', state.stats);
@@ -275,6 +271,7 @@ const ZoneApp = (() => {
       state.tracking.zoneStats[zi].totalMin += (data.duration || z?.focusDuration || 25);
     }
     if (type === 'skip_block') state.tracking.zoneStats[zi].skips++;
+    if (type === 'skip_zone') state.tracking.zoneStats[zi].skips++;
     if (type === 'pause') state.tracking.zoneStats[zi].pauses = (state.tracking.zoneStats[zi].pauses || 0) + 1;
     if (type === 'zone_complete') state.tracking.zoneStats[zi].completes++;
     if (type === 'session_start') state.tracking.sessionCount++;
@@ -456,26 +453,6 @@ const ZoneApp = (() => {
     }
   }
 
-  function skipZone() {
-    const z = getZone(state.currentZoneIdx);
-    if (!z || !confirm(`Skip "${z.title}" and move to next?`)) return;
-    stopTimer();
-    const zs = getCurrentZs();
-    const zi = state.currentZoneIdx;
-    logEvent('skip_zone', { zoneIdx: zi, zoneName: z.title });
-    if (!state.tracking.zoneStats[zi]) state.tracking.zoneStats[zi] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
-    state.tracking.zoneStats[zi].completes++;
-    if (zs) { zs.running = false; zs.completed = true; }
-    const next = zi + 1;
-    if (next >= getZones().length) { finishDay(); return; }
-    state.currentZoneIdx = next;
-    const nz = getZone(next);
-    const nzs = state.byZone[next];
-    if (nzs) { nzs.blockIdx = 0; nzs.blockType = 'focus'; nzs.remaining = (nz.focusDuration || 25) * 60; nzs.total = (nz.focusDuration || 25) * 60; nzs.running = false; nzs.completed = false; nzs.cycle = 0; nzs.elapsed = 0; }
-    renderAll();
-    toast(`Skipped to ${nz?.title || 'next zone'}`, 'success');
-  }
-
   function handleBlockComplete(actualMin) {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
@@ -573,6 +550,66 @@ const ZoneApp = (() => {
     renderAll();
   }
 
+  function continueDay() {
+    const zones = getZones();
+    const last = zones[zones.length - 1] || {};
+    const nh = parseInt(last.endTime?.split(':')[0] || '21') + 1;
+    const newZone = {
+      title: 'Extra',
+      subtitle: 'Additional session',
+      type: 'focus',
+      color: '#38BDF8',
+      startTime: last.endTime || '21:00',
+      endTime: String(nh).padStart(2,'0') + ':00',
+      focusDuration: 25, breakDuration: 5, longBreakDuration: 15,
+      cyclesBeforeLongBreak: 4, totalCycles: 4,
+      timeLimit: 180, cycleTitles: []
+    };
+    zones.push(newZone);
+    state.config.zones = zones;
+    state.dayComplete = false;
+    state.currentZoneIdx = zones.length - 1;
+    state.byZone[state.currentZoneIdx] = initZoneState(newZone, state.currentZoneIdx);
+    saveConfig();
+    saveState();
+    renderAll();
+  }
+
+  function continueSkippedZone(idx) {
+    state.dayComplete = false;
+    state.currentZoneIdx = idx;
+    const z = getZone(idx);
+    if (z) state.byZone[idx] = initZoneState(z, idx);
+    renderAll();
+  }
+
+  function showContinueOptions() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const zones = getZones();
+    const zoneStats = state.tracking.zoneStats || {};
+    let items = '';
+    let hasDone = false, hasSkipped = false;
+    zones.forEach((z, i) => {
+      const zs = zoneStats[i] || {};
+      if (zs.completes > 0 && !zs.doneNoTimer) {
+        if (!hasDone) { items += '<div style="font-size:10px;color:var(--accent-lecture);font-family:var(--mono);letter-spacing:1px;margin-bottom:6px">DONE (TIMER)</div>'; hasDone = true; }
+        items += `<button class="ctl" style="width:100%;padding:12px;margin-bottom:6px;text-align:left;font-size:13px;border-left:4px solid var(--accent-lecture)" onclick="ZoneApp.continueSkippedZone(${i});this.closest('.modal-overlay').remove()">🏁 ${esc(z.title)} <span style="font-size:10px;color:var(--text-muted)">redo</span></button>`;
+      } else if (zs.doneNoTimer > 0) {
+        if (!hasDone) { items += '<div style="font-size:10px;color:var(--accent-suc);font-family:var(--mono);letter-spacing:1px;margin-bottom:6px">DONE (MANUAL)</div>'; hasDone = true; }
+        items += `<button class="ctl" style="width:100%;padding:12px;margin-bottom:6px;text-align:left;font-size:13px;border-left:4px solid var(--accent-suc)" onclick="ZoneApp.continueSkippedZone(${i});this.closest('.modal-overlay').remove()">✓ ${esc(z.title)} <span style="font-size:10px;color:var(--text-muted)">manual · redo</span></button>`;
+      } else {
+        if (!hasSkipped) { items += '<div style="font-size:10px;color:var(--accent-solve);font-family:var(--mono);letter-spacing:1px;margin:' + (hasDone ? '14px' : '0') + ' 0 6px 0">SKIPPED</div>'; hasSkipped = true; }
+        items += `<button class="ctl" style="width:100%;padding:12px;margin-bottom:6px;text-align:left;font-size:13px;border-left:4px solid var(--accent-solve)" onclick="ZoneApp.continueSkippedZone(${i});this.closest('.modal-overlay').remove()">⏭ ${esc(z.title)} <span style="font-size:10px;color:var(--text-muted)">continue</span></button>`;
+      }
+    });
+    items += `<button class="ctl primary" style="width:100%;padding:12px;margin-top:14px;text-align:left;font-size:13px" onclick="ZoneApp.continueDay();this.closest('.modal-overlay').remove()">+ Add Extra Zone</button>`;
+    overlay.innerHTML =
+      `<div class="modal" style="max-width:340px"><div class="modal-header"><h3 style="font-size:15px">Continue</h3><button class="close-x" onclick="this.closest('.modal-overlay').remove()">✕</button></div><div class="modal-body" style="gap:6px">${items}</div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  }
+
   // ─── SET EXAM TRACK ─────────────────────────
   async function setExamTrack(trackId) {
     const track = state.tracks.find(t => t.id === trackId);
@@ -587,6 +624,7 @@ const ZoneApp = (() => {
       CUSTOM: { goal: 'My Goal', tag: 'My pace, my path' }
     };
     const info = goals[trackId] || goals.CUSTOM;
+    state.examTrack = track.name;
     state.config.identity.examTrack = track.name;
     state.config.identity.goalName = info.goal;
     state.config.identity.tagline = info.tag;
@@ -740,22 +778,22 @@ const ZoneApp = (() => {
           </div>
 
           <div class="dc-metrics">
-            <div class="dc-metric" onclick="toast('Focus time today: ${Math.round(focusMin)} minutes','info')">
+            <div class="dc-metric" onclick="ZoneApp.toast('Focus time today: ${Math.round(focusMin)} minutes','info')">
               <span class="dc-metric-num" style="color:var(--accent-lecture)">${Math.round(focusMin)}</span>
               <span class="dc-metric-lbl">FOCUS MIN</span>
               <span class="dc-metric-sub">Total deep work</span>
             </div>
-            <div class="dc-metric" onclick="toast('Completed ${sessions} focus sessions today','info')">
+            <div class="dc-metric" onclick="ZoneApp.toast('Completed ${sessions} focus sessions today','info')">
               <span class="dc-metric-num">${sessions}</span>
               <span class="dc-metric-lbl">SESSIONS</span>
               <span class="dc-metric-sub">Blocks finished</span>
             </div>
-            <div class="dc-metric" onclick="toast('Paused ${pauses} times today','info')">
+            <div class="dc-metric" onclick="ZoneApp.toast('Paused ${pauses} times today','info')">
               <span class="dc-metric-num" style="color:var(--accent-break)">${pauses}</span>
               <span class="dc-metric-lbl">PAUSES</span>
               <span class="dc-metric-sub">Breaks taken</span>
             </div>
-            <div class="dc-metric" onclick="toast('${skips+stops} skips/stops today','info')">
+            <div class="dc-metric" onclick="ZoneApp.toast('${skips+stops} skips/stops today','info')">
               <span class="dc-metric-num" style="color:var(--accent-solve)">${skips+stops}</span>
               <span class="dc-metric-lbl">SKIPS/STOPS</span>
               <span class="dc-metric-sub">Interruptions</span>
@@ -773,6 +811,7 @@ const ZoneApp = (() => {
           </div>
 
           <div class="dc-actions">
+            <button class="dc-secondary-btn" onclick="ZoneApp.showContinueOptions()">▶ CONTINUE</button>
             <button class="dc-primary-btn" onclick="ZoneApp.resetDay()">↻ NEW DAY</button>
           </div>
         </div>`;
@@ -1313,10 +1352,6 @@ const ZoneApp = (() => {
     toast('Event deleted', 'info');
   }
 
-  function showDayEvents(dateStr) {
-    showDayMenu(dateStr);
-  }
-
   function exportEvents() {
     const data = { version: 1, exportedAt: new Date().toISOString(), events: state.events };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1682,6 +1717,24 @@ const ZoneApp = (() => {
       <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
         <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
         <div class="settings-grid">
+          ${!isGuest() ? `
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Account</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);min-width:70px">Username</div>
+                <input type="text" id="usernameInput" value="${esc(state.username)}" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:14px;font-weight:600">
+                <button class="ctl primary" onclick="ZoneApp.changeUsername()" style="padding:8px 14px;font-size:11px">Save</button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);min-width:70px">Password</div>
+                <input type="password" id="currentPwInput" placeholder="Current password" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:13px">
+                <input type="password" id="newPwInput" placeholder="New password" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:13px">
+                <button class="ctl primary" onclick="ZoneApp.changePassword()" style="padding:8px 14px;font-size:11px">Change</button>
+              </div>
+            </div>
+          </div>
+          ` : ''}
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Goal</div>
             <div style="display:flex;flex-direction:column;gap:10px">
@@ -1786,13 +1839,51 @@ const ZoneApp = (() => {
     renderTabBody();
   }
 
+  async function changePassword() {
+    const cur = document.getElementById('currentPwInput')?.value;
+    const pw = document.getElementById('newPwInput')?.value;
+    if (!cur || !pw) { toast('Fill in both fields', 'warning'); return; }
+    if (pw.length < 3) { toast('New password too short (min 3)', 'warning'); return; }
+    try {
+      const res = await fetchJSON('/api/change-password', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ current_password: cur, new_password: pw })
+      });
+      toast('Password updated!', 'success');
+      document.getElementById('currentPwInput').value = '';
+      document.getElementById('newPwInput').value = '';
+    } catch (e) {
+      toast(e.message || 'Failed to change password', 'error');
+    }
+  }
+
+  async function changeUsername() {
+    const inp = document.getElementById('usernameInput');
+    if (!inp) return;
+    const newName = inp.value.trim();
+    if (!newName || newName.length < 2) { toast('Username too short', 'warning'); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(newName)) { toast('Only letters, numbers, hyphens and underscores', 'warning'); return; }
+    if (newName === state.username) { toast('That is already your username', 'info'); return; }
+    if (!confirm(`Change username from "${state.username}" to "${newName}"?`)) return;
+    try {
+      const res = await fetchJSON('/api/change-username', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ new_username: newName })
+      });
+      state.username = res.username;
+      toast('Username changed!', 'success');
+    } catch (e) {
+      toast(e.message || 'Failed to change username', 'error');
+    }
+  }
+
   function renderZoneEditors() {
     return getZones().map((z, i) => {
       const colors = ['#38BDF8','#F26B6B','#FBBF24','#34D399','#A78BFA','#F472B6','#FB923C'];
       const color = z.color || colors[i % colors.length];
       const typeLabels = { focus: 'Focus', break: 'Break', buffer: 'Buffer' };
       const maxLimit = z.type === 'buffer' ? 90 : 300;
-      return `<div class="zone-editor-card" style="border-left:4px solid ${color}">
+      return `<div class="zone-editor-card" style="border-left:4px solid ${color}" id="ze-card-${i}">
         <div class="ze-section">
           <div class="ze-section-title">Basic Info</div>
           <div class="ze-row">
@@ -1805,6 +1896,10 @@ const ZoneApp = (() => {
               <select id="ze-${i}-type" onchange="ZoneApp.onZoneTypeChange(${i})">
                 ${['focus','break','buffer'].map(t => `<option value="${t}" ${z.type === t ? 'selected' : ''}>${typeLabels[t]}</option>`).join('')}
               </select>
+            </div>
+            <div class="ze-field" style="max-width:80px">
+              <label>Color</label>
+              <input type="color" value="${color}" id="ze-${i}-color" oninput="document.getElementById('ze-card-${i}').style.borderLeftColor=this.value" style="width:44px;height:36px;padding:2px;cursor:pointer;background:none;border:1px solid var(--line);border-radius:8px">
             </div>
           </div>
           <div class="ze-field">
@@ -1953,6 +2048,8 @@ const ZoneApp = (() => {
       if (startEl) z.startTime = startEl.value;
       const endEl = document.getElementById(`ze-${i}-end`);
       if (endEl) z.endTime = endEl.value;
+      const colorEl = document.getElementById(`ze-${i}-color`);
+      if (colorEl) z.color = colorEl.value;
       const tlEl = document.getElementById(`ze-${i}-tlim`);
       if (tlEl) z.timeLimit = parseInt(tlEl.value) || 180;
       z.cycleTitles = [];
@@ -2373,9 +2470,11 @@ const ZoneApp = (() => {
     init, render, renderTabBody,
     switchTab, selectZone, jumpToCycle,
     timerToggle, timerStart, timerPause, timerSkip, timerReset,
-    skipZone, markZoneComplete, resetZone, resetDay,
+    markZoneComplete, resetZone, resetDay,
+    continueDay, continueSkippedZone, showContinueOptions,
+    toast,
     openOnboarding, selectExamTrack, closeModal, skipOnboarding,
-    showAddEvent, saveEvent, showDayEvents, deleteEvent,
+    showAddEvent, saveEvent, deleteEvent,
     showEditEvent, updateEvent,
     calPrev, calNext, calToday, showDayMenu,
     closeAndAddEvent, closeAndEditEvent,
@@ -2383,11 +2482,11 @@ const ZoneApp = (() => {
     toggleSetting, clearStats, resetAll, logout,
     syncExport, syncImport, syncHfUpload, syncHfDownload,
     saveGoalName, editTitleInline, generateResetKey,
+    changePassword, changeUsername,
     onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone,
     selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
     toggleSidebar, toggleFullscreen,
-    refreshCharts, scrollToChart, showDayDetail,
-    getState: () => state
+    refreshCharts, scrollToChart, showDayDetail
   };
 })();
 

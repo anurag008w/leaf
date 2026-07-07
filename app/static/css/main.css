@@ -446,7 +446,7 @@ body.fs-active .zone-note { display: none; }
 .dc-ed { font-family: var(--mono); font-size: 9px; color: var(--accent-lecture); min-width: 28px; text-align: right; }
 .dc-empty { padding: 20px; color: var(--text-muted); font-size: 12px; }
 
-.dc-actions { margin-top: 12px; position: relative; }
+.dc-actions { margin-top: 12px; position: relative; display: flex; gap: 10px; justify-content: center; }
 .dc-primary-btn {
   background: linear-gradient(135deg, var(--accent-lecture), color-mix(in srgb, var(--accent-lecture) 70%, #fff));
   color: #fff; border: none; border-radius: 14px;
@@ -456,6 +456,15 @@ body.fs-active .zone-note { display: none; }
 }
 .dc-primary-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 30px color-mix(in srgb, var(--accent-lecture) 35%, transparent); }
 .dc-primary-btn:active { transform: scale(0.97); }
+.dc-secondary-btn {
+  background: linear-gradient(135deg, var(--accent-suc), color-mix(in srgb, var(--accent-suc) 60%, #fff));
+  color: #fff; border: none; border-radius: 14px;
+  padding: 14px 28px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 1px; cursor: pointer;
+  transition: all 0.15s; box-shadow: 0 4px 20px color-mix(in srgb, var(--accent-suc) 20%, transparent);
+}
+.dc-secondary-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 30px color-mix(in srgb, var(--accent-suc) 30%, transparent); }
+.dc-secondary-btn:active { transform: scale(0.97); }
 
 
 /* ─── TIMELINE ─── */

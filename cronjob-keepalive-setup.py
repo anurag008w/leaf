@@ -27,9 +27,8 @@ Env vars consumed:
                       the default ping target. See:
                       https://huggingface.co/docs/hub/en/spaces-overview#built-in-environment-variables
 
-Status is written to KEEPALIVE_STATUS_FILE, and also served by the app at
-GET /keepalive-status (see server.js) so you can sanity-check setup from
-the browser instead of digging through container logs.
+Status is written to KEEPALIVE_STATUS_FILE so you can sanity-check setup
+from container logs instead of digging through the cron-job.org dashboard.
 """
 
 from __future__ import annotations
