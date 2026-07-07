@@ -191,6 +191,8 @@ const ZoneApp = (() => {
     saveUserDataToServer('tracking');
     saveUserDataToServer('events');
     saveUserDataToServer('settings');
+    if (state.examTrack) saveUserDataToServer('examTrack');
+    if (state.examDates?.length) saveUserDataToServer('examDates');
     _lastHttpSave = Date.now();
     _pendingHttpSave = null;
   }
@@ -3181,12 +3183,39 @@ const ZoneApp = (() => {
     const savedExamDates = storage().get('examDates');
     if (savedExamDates) state.examDates = savedExamDates;
 
-    // load server-side session as fallback (for when localStorage is cleared)
-    if (!isGuest() && !loadSession()) {
+    // load server-side data as fallback (cross-device sync)
+    if (!isGuest()) {
       try {
         const serverData = await fetchJSON('/api/user-data');
-        if (serverData && serverData.session) {
-          storage().set('session', serverData.session);
+        if (serverData) {
+          if (serverData.session && !loadSession()) {
+            storage().set('session', serverData.session);
+          }
+          if (!storage().get('stats') && serverData.stats) {
+            storage().set('stats', serverData.stats);
+            Object.assign(state.stats, serverData.stats);
+          }
+          if (!storage().get('tracking') && serverData.tracking) {
+            storage().set('tracking', serverData.tracking);
+            state.tracking = serverData.tracking;
+          }
+          if (!storage().get('events') && serverData.events) {
+            storage().set('events', serverData.events);
+            state.events = serverData.events;
+          }
+          if (!storage().get('settings') && serverData.settings) {
+            storage().set('settings', serverData.settings);
+            Object.assign(state.settings, serverData.settings);
+            applyTheme(state.settings.theme || 'hacker');
+          }
+          if (!storage().get('examTrack') && serverData.examTrack) {
+            storage().set('examTrack', serverData.examTrack);
+            state.examTrack = serverData.examTrack;
+          }
+          if (!storage().get('examDates') && serverData.examDates) {
+            storage().set('examDates', serverData.examDates);
+            state.examDates = serverData.examDates;
+          }
         }
       } catch {}
     }

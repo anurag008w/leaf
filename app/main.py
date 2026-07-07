@@ -184,7 +184,7 @@ def resolve_username(token: str) -> str | None:
         return None
     return _token_users.get(token)
 
-USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session"})
+USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates"})
 
 def read_user_data(uname: str) -> dict:
     if not uname:
