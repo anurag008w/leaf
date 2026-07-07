@@ -29,6 +29,8 @@ ZONE_PASSWORD = os.environ.get("ZONE_PASSWORD", "").strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
 SYNC_RESTORE = os.environ.get("SYNC_RESTORE", "true").strip().lower() in ("1", "true", "yes")
+HUB_ENABLED = os.environ.get("HUB_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+SPACE_ID = os.environ.get("SPACE_ID", "").strip()
 
 _sync_task: asyncio.Task | None = None
 _sync_last_fp: str | None = None
@@ -45,7 +47,7 @@ config_cache = {"data": None, "mtime": 0}
 USERS_FILE = DATA_DIR / "users.json"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 GUEST_PREFIX = "guest_"
-IS_LOCAL = os.environ.get("SPACE_ID", "").strip() == ""
+IS_LOCAL = SPACE_ID == ""
 
 # ── In-memory rate limiter ─────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
@@ -683,6 +685,14 @@ async def sync_import(body: SyncImportBody, request: Request):
             except Exception as e:
                 errors.append(f"{key}: {e}")
     return {"status": "ok", "errors": errors}
+
+# ── Hub dashboard ────────────────────────────────────
+@app.get("/api/hub")
+async def hub_info():
+    if not HUB_ENABLED or not SPACE_ID:
+        return {"enabled": False}
+    direct_url = f"https://{SPACE_ID.replace('/', '-')}.hf.space"
+    return {"enabled": True, "url": direct_url, "space_id": SPACE_ID}
 
 # ── Static files ──────────────────────────────────
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
