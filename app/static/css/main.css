@@ -774,6 +774,7 @@ input[type=color] { width: 44px; height: 36px; border: 1px solid var(--line); bo
 .min-val { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
 .dt-num { font-family: var(--mono); font-weight: 600; }
 .dt-warn { color: var(--accent-break); }
+.dt-manual { color: var(--accent-lecture); }
 .month-row td { padding: 10px 10px 6px; font-weight: 700; font-size: 13px; border-bottom: 2px solid var(--line); background: var(--bg-3); }
 .month-row:hover { background: var(--bg-3); }
 .month-total { font-weight: 400; font-size: 10px; color: var(--text-muted); font-family: var(--mono); margin-left: 10px; }

@@ -301,20 +301,36 @@ const ZoneApp = (() => {
     const log = state.tracking.log;
     const today = todayKey();
     const todayEvents = log.filter(e => e.date === today);
+    const zones = getZones();
+    const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
+
     const sessionsToday = todayEvents.filter(e => e.type === 'session_complete').length;
+    const manualToday = todayEvents.filter(e => e.type === 'zone_complete').length;
     const skipsToday = todayEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
     const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
-      .reduce((a, e) => a + (e.duration || 0), 0);
+      .reduce((a, e) => a + (e.duration || 0), 0)
+      + todayEvents.filter(e => e.type === 'zone_complete')
+        .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
     const totalSessions = log.filter(e => e.type === 'session_complete').length;
+    const totalManual = log.filter(e => e.type === 'zone_complete').length;
     const totalFocusMin = log.filter(e => e.type === 'session_complete')
-      .reduce((a, e) => a + (e.duration || 0), 0);
+      .reduce((a, e) => a + (e.duration || 0), 0)
+      + log.filter(e => e.type === 'zone_complete')
+        .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
 
     const dailyMap = {};
     log.forEach(e => {
-      if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, sessions: 0, skips: 0, events: [] };
+      if (!dailyMap[e.date]) dailyMap[e.date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
       if (e.type === 'session_complete') {
-        dailyMap[e.date].focusMin += (e.duration || 0);
+        const d = e.duration || 0;
+        dailyMap[e.date].focusMin += d;
+        dailyMap[e.date].timerMin += d;
         dailyMap[e.date].sessions++;
+      }
+      if (e.type === 'zone_complete') {
+        const d = zoneLookup(e.zoneIdx).focusDuration || 25;
+        dailyMap[e.date].focusMin += d;
+        dailyMap[e.date].manualDone++;
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
         dailyMap[e.date].skips++;
@@ -334,7 +350,6 @@ const ZoneApp = (() => {
     }
 
     const zoneStats = state.tracking.zoneStats || {};
-    const zones = getZones();
     const zoneData = zones.map((z, i) => ({
       ...z, idx: i,
       ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
@@ -346,12 +361,19 @@ const ZoneApp = (() => {
     sortedEntries.forEach(([date, data]) => {
       const m = date.slice(0, 7);
       if (!monthGroups.length || monthGroups[monthGroups.length - 1].month !== m) {
-        monthGroups.push({ month: m, label: new Date(m + '-01').toLocaleDateString('en', { year: 'numeric', month: 'long' }), days: [], totalFocus: 0, totalSessions: 0, totalSkips: 0 });
+        monthGroups.push({ month: m, label: new Date(m + '-01').toLocaleDateString('en', { year: 'numeric', month: 'long' }), days: [], totalFocus: 0, totalSessions: 0, totalManual: 0, totalSkips: 0 });
       }
       const g = monthGroups[monthGroups.length - 1];
       g.days.push({ date, ...data });
       g.totalFocus += data.focusMin;
       g.totalSessions += data.sessions;
+      g.totalManual += data.manualDone;
+      g.totalSkips += data.skips;
+    });
+
+    return { todayEvents, sessionsToday, manualToday, skipsToday, focusMinToday,
+      totalSessions, totalManual, totalFocusMin, dailyMap, streak, zoneData, log, monthGroups };
+  }
       g.totalSkips += data.skips;
     });
 
@@ -1499,14 +1521,17 @@ const ZoneApp = (() => {
     const ts = getTrackingStats();
     const totalFocus = ts.totalFocusMin;
     const totalSessions = ts.totalSessions;
+    const totalManual = ts.totalManual;
     const sessionsToday = ts.sessionsToday;
+    const manualToday = ts.manualToday;
     const skipsToday = ts.skipsToday;
     const focusToday = ts.focusMinToday;
     const streak = ts.streak;
 
     const avgSession = totalSessions > 0 ? Math.round(totalFocus / totalSessions) : 0;
-    const completionRate = sessionsToday + skipsToday > 0
-      ? Math.round((sessionsToday / (sessionsToday + skipsToday)) * 100) : 0;
+    const allTodaySessions = sessionsToday + manualToday;
+    const completionRate = allTodaySessions + skipsToday > 0
+      ? Math.round((allTodaySessions / (allTodaySessions + skipsToday)) * 100) : 0;
 
     const today = todayKey();
     const todayEvents = ts.todayEvents.slice(-20).reverse();
@@ -1540,6 +1565,10 @@ const ZoneApp = (() => {
             <div class="num">${sessionsToday}</div>
             <div class="lbl">TODAY'S SESSIONS</div>
           </div>
+          <div class="stat-card-s">
+            <div class="num">${manualToday}</div>
+            <div class="lbl">MANUAL DONE</div>
+          </div>
           <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${focusToday}</div>
             <div class="lbl">TODAY FOCUS MIN</div>
@@ -1557,7 +1586,11 @@ const ZoneApp = (() => {
         <div class="stats-grid-4">
           <div class="stat-card-s">
             <div class="num">${totalSessions}</div>
-            <div class="lbl">ALL-TIME SESSIONS</div>
+            <div class="lbl">TIMER SESSIONS</div>
+          </div>
+          <div class="stat-card-s">
+            <div class="num">${totalManual}</div>
+            <div class="lbl">MANUAL DONE</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${(totalFocus / 60).toFixed(1)}h</div>
@@ -1607,16 +1640,18 @@ const ZoneApp = (() => {
               <thead><tr>
                 <th>Date</th>
                 <th>Focus</th>
-                <th>Sessions</th>
+                <th>Timer</th>
+                <th>Manual</th>
                 <th>Skips</th>
                 <th>Rate</th>
               </tr></thead>
               <tbody>
                 ${ts.monthGroups.map(g => `
-                  <tr class="month-row"><td colspan="5">${esc(g.label)} <span class="month-total">${g.totalFocus}m · ${g.totalSessions} sessions · ${g.totalSkips} skips</span></td></tr>
+                  <tr class="month-row"><td colspan="6">${esc(g.label)} <span class="month-total">${g.totalFocus}m · ${g.totalSessions} timer · ${g.totalManual} manual · ${g.totalSkips} skips</span></td></tr>
                   ${g.days.map(d => {
-                    const total = d.sessions + d.skips;
-                    const rate = total > 0 ? Math.round((d.sessions / total) * 100) + '%' : '—';
+                    const totalDone = d.sessions + d.manualDone;
+                    const total = totalDone + d.skips;
+                    const rate = total > 0 ? Math.round((totalDone / total) * 100) + '%' : '—';
                     const dateObj = new Date(d.date + 'T00:00:00');
                     const label = dateObj.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
                     const isToday = d.date === todayKey();
@@ -1630,6 +1665,7 @@ const ZoneApp = (() => {
                         </div>
                       </td>
                       <td class="dt-num">${d.sessions}</td>
+                      <td class="dt-num ${d.manualDone > 0 ? 'dt-manual' : ''}">${d.manualDone || '—'}</td>
                       <td class="dt-num ${d.skips > 2 ? 'dt-warn' : ''}">${d.skips}</td>
                       <td class="dt-num">${rate}</td>
                     </tr>`;
@@ -1689,9 +1725,14 @@ const ZoneApp = (() => {
 
   function showDayReport(date) {
     const log = state.tracking.log;
+    const zones = getZones();
+    const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
     const events = log.filter(e => e.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const totalFocus = events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
-    const sessions = events.filter(e => e.type === 'session_complete').length;
+    const timerSessions = events.filter(e => e.type === 'session_complete').length;
+    const manualDone = events.filter(e => e.type === 'zone_complete').length;
+    const totalFocus = events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
+      + events.filter(e => e.type === 'zone_complete').reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
+    const sessions = timerSessions + manualDone;
     const skips = events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
     const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
     const dateObj = new Date(date + 'T00:00:00');
@@ -1699,7 +1740,7 @@ const ZoneApp = (() => {
 
     const iconMap = { session_start: '▶', session_complete: '✓', skip_block: '⏭', pause: '⏸', skip_zone: '⏩', zone_complete: '🏁', break: '☕' };
     const clsMap = { session_start: 'start', session_complete: 'complete', skip_block: 'skip', pause: 'pause', skip_zone: 'skip', zone_complete: 'zone', break: 'break' };
-    const labelMap = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', zone_complete: 'Zone complete', break: 'Break started' };
+    const labelMap = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', zone_complete: 'Done (manual)', break: 'Break started' };
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1711,7 +1752,8 @@ const ZoneApp = (() => {
       <div class="modal-body">
         <div class="dr-summary">
           <div class="dr-stat"><span class="dr-num">${totalFocus}</span><span class="dr-lbl">Focus min</span></div>
-          <div class="dr-stat"><span class="dr-num">${sessions}</span><span class="dr-lbl">Sessions</span></div>
+          <div class="dr-stat"><span class="dr-num">${timerSessions}</span><span class="dr-lbl">Timer</span></div>
+          <div class="dr-stat"><span class="dr-num">${manualDone}</span><span class="dr-lbl">Manual</span></div>
           <div class="dr-stat"><span class="dr-num">${skips}</span><span class="dr-lbl">Skips</span></div>
           <div class="dr-stat"><span class="dr-num">${rate}%</span><span class="dr-lbl">Completion</span></div>
         </div>
@@ -1844,7 +1886,7 @@ const ZoneApp = (() => {
     // Completion rate gauge
     const compCtx = document.getElementById('completionChart');
     if (compCtx && window.Chart) {
-      const completed = ts.sessionsToday;
+      const completed = ts.sessionsToday + ts.manualToday;
       const skipped = ts.skipsToday;
       if (completed + skipped > 0) {
         chartInstances.completion = new Chart(compCtx, {
