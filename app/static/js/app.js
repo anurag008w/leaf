@@ -1136,6 +1136,19 @@ const ZoneApp = (() => {
       if (e.type === 'zone_complete') {
         state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
         state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - dur);
+        if (state.stats.history[today]) {
+          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 1) - 1);
+          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || dur) - dur);
+        }
+      }
+      if (e.type === 'skip_block' && e.blockType === 'focus') {
+        const partial = Math.round((((z?.focusDuration || 25) * 60) - (e.remaining || 0)) / 60);
+        if (partial >= 1) {
+          state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - partial);
+          if (state.stats.history[today]) {
+            state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || partial) - partial);
+          }
+        }
       }
     });
     state.tracking.log = state.tracking.log.filter(e => !(e.zoneIdx === idx && e.date === today));
@@ -1151,6 +1164,7 @@ const ZoneApp = (() => {
     zs.remaining = dur * 60;
     zs.total = dur * 60;
     zs.elapsed = 0;
+    if (state.dayComplete) state.dayComplete = false;
     saveState();
     renderAll();
     toast('Zone reset — stats rolled back', 'info');
