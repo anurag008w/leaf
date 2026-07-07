@@ -620,8 +620,11 @@ const ZoneApp = (() => {
     state.tracking.log.push({ id: uid(), date: todayKey(), time: new Date().toISOString(), type: 'zone_complete', ...evData });
     if (!state.tracking.zoneStats[idx]) state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
     state.tracking.zoneStats[idx].doneNoTimer++;
+    const key = todayKey();
+    if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
     state.stats.totalSessions++;
-    if (z) state.stats.totalFocusMin += (z.focusDuration || 25);
+    state.stats.history[key].sessions++;
+    if (z) { const d = z.focusDuration || 25; state.stats.totalFocusMin += d; state.stats.history[key].focusMin += d; }
     saveState();
     if (zs) { zs.running = false; zs.completed = true; stopTimer(); }
     if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); renderAll(); return; }
@@ -3176,7 +3179,7 @@ const ZoneApp = (() => {
     if (savedStats) Object.assign(state.stats, savedStats);
 
     const savedTracking = storage().get('tracking');
-    if (savedTracking) state.tracking = savedTracking;
+    if (savedTracking) Object.assign(state.tracking, savedTracking);
 
     const savedExam = storage().get('examTrack');
     if (savedExam) state.examTrack = savedExam;
