@@ -30,6 +30,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
 SYNC_RESTORE = os.environ.get("SYNC_RESTORE", "true").strip().lower() in ("1", "true", "yes")
 HUB_ENABLED = os.environ.get("HUB_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+HUB_URL = os.environ.get("HUB_URL", "").strip()
 SPACE_ID = os.environ.get("SPACE_ID", "").strip()
 
 _sync_task: asyncio.Task | None = None
@@ -689,10 +690,10 @@ async def sync_import(body: SyncImportBody, request: Request):
 # ── Hub dashboard ────────────────────────────────────
 @app.get("/api/hub")
 async def hub_info():
-    if not HUB_ENABLED or not SPACE_ID:
+    url = HUB_URL or (f"https://{SPACE_ID.replace('/', '-')}.hf.space" if SPACE_ID else "")
+    if not HUB_ENABLED or not url:
         return {"enabled": False}
-    direct_url = f"https://{SPACE_ID.replace('/', '-')}.hf.space"
-    return {"enabled": True, "url": direct_url, "space_id": SPACE_ID}
+    return {"enabled": True, "url": url, "space_id": SPACE_ID}
 
 # ── Static files ──────────────────────────────────
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
