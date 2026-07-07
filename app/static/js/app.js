@@ -791,17 +791,14 @@ const ZoneApp = (() => {
 
   function switchTab(tab) {
     state.tab = tab;
+    if (state._examTimerInterval) { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
+    render();
     if (tab === 'exam-timer') {
-      if (state._examTimerInterval) clearInterval(state._examTimerInterval);
       state._examTimerInterval = setInterval(() => {
-        const el = document.querySelector('.exam-timer-wrap');
-        if (el) renderTabBody();
+        if (document.querySelector('.exam-timer-wrap')) tickExamTimers();
         else { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
       }, 1000);
-    } else {
-      if (state._examTimerInterval) { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
     }
-    render();
   }
 
   function renderTabBody() {
@@ -2039,36 +2036,30 @@ const ZoneApp = (() => {
           <h2 style="font-size:20px;font-weight:700">⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
           <button class="ctl" onclick="ZoneApp.openExamDateEditor()" style="padding:6px 14px;font-size:11px">✏️ Edit Dates</button>
         </div>
-        <div class="exam-grid">
-          ${exams.map(e => {
-            const target = new Date(e.date + 'T23:59:59');
+        <div class="exam-grid" id="examGrid">
+          ${exams.map((e, i) => {
+            const target = new Date(e.date + 'T23:59:59').getTime();
             const diff = target - now;
-            const totalDays = Math.max(0, Math.ceil(diff / 86400000));
-            const totalHours = Math.max(0, Math.floor(diff / 3600000));
-            const days = Math.floor(totalDays);
-            const hours = Math.floor((diff % 86400000) / 3600000);
-            const mins = Math.floor((diff % 3600000) / 60000);
-            const secs = Math.floor((diff % 60000) / 1000);
             const expired = diff <= 0;
-            return `<div class="exam-card ${expired ? 'expired' : ''}">
+            return `<div class="exam-card ${expired ? 'expired' : ''}" data-target="${target}">
               <div class="exam-card-head">
                 <span class="exam-icon">${e.icon}</span>
                 <span class="exam-name">${esc(e.name)}</span>
                 <span class="exam-date">${e.date}</span>
               </div>
-              <div class="exam-countdown">
+              <div class="exam-countdown" id="ecd-${i}">
                 ${expired ? '<div class="exam-expired">🎉 Exam Date Reached</div>'
                 : `
-                  <div class="exam-unit"><span class="exam-num">${String(days).padStart(2,'0')}</span><span class="exam-lbl">Days</span></div>
+                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
                   <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num">${String(hours).padStart(2,'0')}</span><span class="exam-lbl">Hours</span></div>
+                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
                   <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num">${String(mins).padStart(2,'0')}</span><span class="exam-lbl">Mins</span></div>
+                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
                   <span class="exam-sep">:</span>
-                  <div class="exam-unit"><span class="exam-num">${String(secs).padStart(2,'0')}</span><span class="exam-lbl">Secs</span></div>
+                  <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>
                 `}
               </div>
-              ${!expired ? `<div class="exam-total">${totalDays} days remaining</div>` : ''}
+              ${!expired ? `<div class="exam-total" id="ecd-${i}-total">0 days remaining</div>` : ''}
             </div>`;
           }).join('')}
         </div>
@@ -2076,6 +2067,39 @@ const ZoneApp = (() => {
           ${state.examTrack ? 'Dates auto-configured for ' + esc(state.examTrack) + '. Click "Edit Dates" to customize.' : 'Select an exam track in Settings to see countdown.'}
         </div>
       </div>`;
+    tickExamTimers();
+  }
+
+  function tickExamTimers() {
+    const now = Date.now();
+    document.querySelectorAll('.exam-card[data-target]').forEach((card, i) => {
+      const target = parseInt(card.dataset.target);
+      const diff = target - now;
+      if (diff <= 0) {
+        const cd = card.querySelector('.exam-countdown');
+        if (cd && !cd.querySelector('.exam-expired')) {
+          cd.innerHTML = '<div class="exam-expired">🎉 Exam Date Reached</div>';
+          const total = card.querySelector('.exam-total');
+          if (total) total.remove();
+          card.classList.add('expired');
+        }
+        return;
+      }
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      const dEl = document.getElementById('ecd-' + i + '-d');
+      const hEl = document.getElementById('ecd-' + i + '-h');
+      const mEl = document.getElementById('ecd-' + i + '-m');
+      const sEl = document.getElementById('ecd-' + i + '-s');
+      const tEl = document.getElementById('ecd-' + i + '-total');
+      if (dEl) dEl.textContent = String(days).padStart(2,'0');
+      if (hEl) hEl.textContent = String(hours).padStart(2,'0');
+      if (mEl) mEl.textContent = String(mins).padStart(2,'0');
+      if (sEl) sEl.textContent = String(secs).padStart(2,'0');
+      if (tEl) tEl.textContent = days + ' days remaining';
+    });
   }
 
   function openExamDateEditor() {
