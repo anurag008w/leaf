@@ -436,11 +436,11 @@ const ZoneApp = (() => {
   }
 
   // ─── Timer Engine ────────────────────────────
-  function stopTimer() { if (state.timerHandle) { clearInterval(state.timerHandle); state.timerHandle = null; } }
+  function stopTimer() { if (state.timerHandle) { clearInterval(state.timerHandle); state.timerHandle = null; } document.title = 'Zone — Study OS'; }
 
   function timerTick() {
     const zs = getCurrentZs();
-    if (!zs || !zs.running) return;
+    if (!zs || !zs.running) { document.title = 'Zone — Study OS'; return; }
     if (zs.remaining <= 0) {
       stopTimer();
       zs.running = false;
@@ -470,6 +470,8 @@ const ZoneApp = (() => {
     if (zs.remaining < 300 && zs.remaining % 60 === 0) chime('tick');
     saveState();
     updateTimerDisplay();
+    const z = getZone(state.currentZoneIdx);
+    document.title = `${fmtTime(zs.remaining)} — ${z ? z.title : 'Zone'} — Study OS`;
   }
 
   function timerStart() {
