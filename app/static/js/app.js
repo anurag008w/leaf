@@ -521,18 +521,9 @@ const ZoneApp = (() => {
     if (!zs) return;
     stopTimer();
     zs.running = false;
-    const wasFocus = zs.blockType === 'focus';
-    const actualMin = wasFocus ? Math.round((((z?.focusDuration || 25) * 60) - zs.remaining) / 60) : 0;
-    if (wasFocus) logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+    if (zs.blockType === 'focus') logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
     zs.remaining = 0;
     if (zs.blockType === 'focus') {
-      if (actualMin >= 1) {
-        state.stats.totalFocusMin += actualMin;
-        const key = todayKey();
-        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
-        state.stats.history[key].focusMin += actualMin;
-        saveState();
-      }
       zs.blockType = 'break';
       const bdur = getBreakDur(z, zs.cycle) * 60;
       zs.remaining = bdur; zs.total = bdur;
