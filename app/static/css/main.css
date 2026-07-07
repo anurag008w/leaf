@@ -36,12 +36,12 @@ body {
   color: var(--text-primary);
   font-family: var(--font);
   min-height: 100vh;
-  padding: 22px 22px 60px;
+  padding: 22px 22px 30px;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
 .mono { font-family: var(--mono); }
-.wrap { width: 100%; margin: 0 auto; height: calc(100vh - 82px); overflow-y: auto; }
+.wrap { width: 100%; margin: 0 auto; min-height: calc(100vh - 82px); overflow-y: auto; }
 button, input, select { font-family: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 2px solid var(--accent-lecture); outline-offset: 2px; }
