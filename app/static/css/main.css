@@ -319,10 +319,11 @@ h1 { font-size: clamp(22px, 4vw, 32px); margin: 6px 0 0; font-weight: 700; lette
 .layout { display: grid; grid-template-columns: 240px 1fr; gap: 24px; transition: grid-template-columns 0.25s ease; }
 .layout.sidebar-collapsed { grid-template-columns: 0 1fr; gap: 0; }
 .layout.sidebar-collapsed .sidebar { overflow: hidden; width: 0; padding: 0; margin: 0; border: none; opacity: 0; pointer-events: none; }
+body.fs-active { padding: 0; }
 body.fs-active header,
 body.fs-active .tabs,
 body.fs-active footer { display: none; }
-body.fs-active .wrap { height: 100vh; }
+body.fs-active .wrap { height: 100dvh; min-height: 100dvh; }
 body.fs-active .console-toolbar { display: none; }
 body.fs-active .sidebar { display: none; }
 body.fs-active .day-progress { display: none; }
@@ -337,13 +338,22 @@ body.fs-active .panel {
 }
 body.fs-active .panel-glow { display: none; }
 body.fs-active .panel-head { justify-content: center; text-align: center; }
-body.fs-active .panel-head h2 { font-size: 28px; }
+body.fs-active .panel-head h2 { font-size: 34px; letter-spacing: 2px; }
 body.fs-active .panel-head .kicker { display: none; }
 body.fs-active .ph-right { margin: 0 auto; }
-body.fs-active .ring-wrap { margin: 8px auto; }
+body.fs-active .ring-wrap {
+  width: min(420px, 80vw); height: min(420px, 80vw);
+  margin: 12px auto;
+}
+body.fs-active .ring-wrap svg { width: 100%; height: 100%; }
+body.fs-active .ring-time { font-size: min(68px, 16vw); }
+body.fs-active .ring-label { font-size: 13px; letter-spacing: 3.5px; margin-top: 10px; }
 body.fs-active .timer-area { justify-content: center; }
 body.fs-active .tl-section { display: none; }
 body.fs-active .zone-note { display: none; }
+body.fs-active .controls { gap: 14px; margin-top: 16px; }
+body.fs-active .ctl { padding: 18px 28px; font-size: 13px; border-radius: var(--r-lg); }
+body.fs-active .panel { max-width: 640px; padding: 32px 28px 40px; }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .layout.sidebar-collapsed { grid-template-columns: 1fr; } }
 
 /* ─── SIDEBAR ZONES ─── */
@@ -1160,6 +1170,10 @@ input[type=range]::-moz-range-track {
   .timer-area { gap: 20px; padding: 10px 0 16px; }
   .ring-wrap { width: 220px; height: 220px; }
   .ring-time { font-size: 32px; }
+  body.fs-active { padding: 0; }
+  body.fs-active .panel { padding: 20px 14px; }
+  body.fs-active .ctl { padding: 14px 18px; font-size: 11px; }
+  body.fs-active .ring-label { font-size: 10px; margin-top: 6px; }
   .cal-cell { min-height: 32px; }
   .cal-num { font-size: 10px; }
   .ze-row { flex-direction: column; align-items: stretch; }
