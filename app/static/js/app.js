@@ -28,6 +28,16 @@ const ZoneApp = (() => {
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const uid = () => Math.random().toString(36).slice(2,9);
 
+  // Robust JSON parse for user-imported files: strips UTF-8 BOM (common from
+  // Windows editors / Excel exports) and stray leading/trailing whitespace,
+  // both of which make otherwise-valid JSON throw in JSON.parse.
+  function parseImportedJSON(raw) {
+    let text = String(raw ?? '');
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+    text = text.trim();
+    return JSON.parse(text);
+  }
+
   function fmtTime(s) {
     s = Math.max(0, Math.round(s));
     return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
@@ -972,7 +982,7 @@ const ZoneApp = (() => {
         </div>
         <div class="ct-actions">
           <button class="ct-btn fs-toggle" onclick="ZoneApp.toggleFullscreen()" title="Fullscreen">⛶</button>
-          <label class="ct-btn">⬆ Import<input type="file" accept="application/json" style="display:none" onchange="ZoneApp.importConfig(this.files[0])"></label>
+          <label class="ct-btn">⬆ Import<input type="file" accept=".json,application/json" style="display:none" onchange="ZoneApp.importConfig(this.files[0])"></label>
           <button class="ct-btn" onclick="ZoneApp.exportConfig()">⬇ Export</button>
         </div>
       </div>
@@ -1385,7 +1395,7 @@ const ZoneApp = (() => {
             <button class="ctl" onclick="ZoneApp.calToday()" style="padding:6px 14px;font-size:11px">Today</button>
             <button class="ctl primary" onclick="ZoneApp.showAddEvent()" style="padding:6px 14px;font-size:11px">+ Event</button>
             <button class="ctl" onclick="ZoneApp.exportEvents()" style="padding:6px 12px;font-size:11px">⬇ Export</button>
-            <label class="ctl" style="padding:6px 12px;font-size:11px;cursor:pointer">⬆ Import<input type="file" accept="application/json" style="display:none" onchange="ZoneApp.importEvents(this.files[0])"></label>
+            <label class="ctl" style="padding:6px 12px;font-size:11px;cursor:pointer">⬆ Import<input type="file" accept=".json,application/json" style="display:none" onchange="ZoneApp.importEvents(this.files[0])"></label>
           </div>
         </div>
 
@@ -1594,7 +1604,7 @@ const ZoneApp = (() => {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result);
+        const data = parseImportedJSON(reader.result);
         const events = data.events || data;
         if (!Array.isArray(events) || events.length === 0) { toast('No events found in file', 'error'); return; }
         const count = events.filter(e => e.title && e.date).length;
@@ -2899,7 +2909,7 @@ const ZoneApp = (() => {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result);
+        const data = parseImportedJSON(reader.result);
         if (!data.zones || !Array.isArray(data.zones) || data.zones.length === 0) {
           toast('Invalid config: no zones found', 'error'); return;
         }
@@ -3009,13 +3019,13 @@ const ZoneApp = (() => {
 
   function syncImport() {
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = '.json';
+    inp.type = 'file'; inp.accept = '.json,application/json';
     inp.onchange = async () => {
       const file = inp.files[0];
       if (!file) return;
       try {
         const text = await file.text();
-        const data = JSON.parse(text);
+        const data = parseImportedJSON(text);
         const r = await fetchJSON('/api/sync/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) });
         if (!r) return;
         if (r.errors && r.errors.length) toast('Restore with errors: ' + r.errors.join(', '), 'warning');
