@@ -34,13 +34,13 @@ jobs:
           
       - name: Install Git Xet
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh | sh
+          set -e
+          curl --proto '=https' --tlsv1.2 -sSfL --fail -o /tmp/xet-install.sh https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh
+          bash /tmp/xet-install.sh
           git xet --version
       - name: Verify Xet
         run: |
-          which git-xet
-          git xet --version
-          git xet install
+          which git-xet && git xet --version && git xet install
           
       - name: Track large binaries via Git LFS/Xet
         run: |

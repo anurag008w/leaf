@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-export ZONE_USERNAME="admin"
-export ZONE_PASSWORD="admin2008"
+export ZONE_USERNAME="${ZONE_USERNAME:-admin}"
+export ZONE_PASSWORD="${ZONE_PASSWORD:-admin2008}"
 PORT=7860
 
 # Check if port is in use using /dev/tcp (bash built-in)
@@ -23,7 +23,6 @@ fi
 
 echo "Starting Zone Study OS Server..."
 echo "URL: http://localhost:$PORT"
-echo "User: admin / Password: admin2008"
 echo "-----------------------------------"
 
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT &
