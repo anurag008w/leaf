@@ -733,6 +733,7 @@ const ZoneApp = (() => {
     state.currentZoneIdx = idx;
     const z = getZone(idx);
     if (z) state.byZone[idx] = initZoneState(z, idx);
+    saveState();
     renderAll();
   }
 
@@ -1059,7 +1060,7 @@ const ZoneApp = (() => {
         <div class="zb-bar" style="background:${z.color}"></div>
         <div class="zb-body">
           <div class="zb-top">
-            <span class="zb-id">Z${String(z.id).padStart(2,'0')}</span>
+            <span class="zb-id">Z${String(z.id ?? i + 1).padStart(2,'0')}</span>
             <span class="zb-type">${esc(z.type || 'FOCUS')}</span>
             <span class="dot ${dotClass}"></span>
           </div>
@@ -1678,7 +1679,12 @@ const ZoneApp = (() => {
         if (!Array.isArray(events) || events.length === 0) { toast('No events found in file', 'error'); return; }
         const count = events.filter(e => e.title && e.date).length;
         if (count === 0) { toast('Invalid event data', 'error'); return; }
-        events.forEach(e => { if (!e.id) e.id = uid(); if (!e.color) e.color = '#38BDF8'; });
+        const existingIds = new Set((state.events || []).map(e => e.id));
+        events.forEach(e => {
+          if (!e.id || existingIds.has(e.id)) e.id = uid();
+          if (!e.color) e.color = '#38BDF8';
+          existingIds.add(e.id);
+        });
         if (!Array.isArray(state.events)) state.events = [];
         state.events = [...state.events, ...events];
         saveState();
@@ -1923,7 +1929,11 @@ const ZoneApp = (() => {
 
     const iconMap = { session_start: '▶', session_complete: '✓', skip_block: '⏭', pause: '⏸', skip_zone: '⏩', zone_complete: '🏁', break: '☕' };
     const clsMap = { session_start: 'start', session_complete: 'complete', skip_block: 'skip', pause: 'pause', skip_zone: 'skip', zone_complete: 'zone', break: 'break' };
-    const labelMap = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', zone_complete: 'Done (manual)', break: 'Break started' };
+    function eventLabel(e) {
+      if (e.type === 'zone_complete') return zonesWithTimerPerDay.has(e.zoneIdx) ? 'Zone complete' : 'Done (manual)';
+      const m = { session_start: 'Session started', session_complete: 'Session complete', skip_block: 'Block skipped', pause: 'Timer paused', skip_zone: 'Zone skipped', break: 'Break started' };
+      return m[e.type] || e.type;
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1963,7 +1973,7 @@ const ZoneApp = (() => {
           : events.map(e => {
             const icon = iconMap[e.type] || '•';
             const cls = clsMap[e.type] || '';
-            const l = labelMap[e.type] || e.type;
+            const l = eventLabel(e);
             const detail = e.zoneIdx !== undefined ? `Zone ${(e.zoneIdx || 0) + 1}` : '';
             const time = e.time ? e.time.slice(11, 16) : '--:--';
             return `<div class="event-item">
@@ -3038,7 +3048,7 @@ const ZoneApp = (() => {
     state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
     state.events = [];
     state.config = { identity: {}, zones: [] };
-    state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true };
+    state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker' };
     state.examTrack = null;
     state.onboarded = false;
     state.byZone = {};
@@ -3202,15 +3212,15 @@ const ZoneApp = (() => {
     if (!document.fullscreenElement && state.fullscreen) { state.fullscreen = false; document.body.classList.remove('fs-active'); }
   });
 
-  function cardHTML(s, z, desktop) {
+  function cardHTML(s, z, desktop, idx) {
     const accent = s.glowC || z.color;
     return `<div class="wp-card" style="background:${s.panel};border:${s.borderW}px solid ${s.line};border-radius:${s.radius}px">
       <div class="wp-card-accent" style="background:${accent}"></div>
       <div class="wp-card-top">
-        <span class="wp-card-num" style="color:${accent}">${String(z.id).padStart(2,'0')}</span>
+        <span class="wp-card-num" style="color:${accent}">${String(z.id ?? idx + 1).padStart(2,'0')}</span>
         <span class="wp-card-badge" style="color:${accent};border-color:${accent}">${esc(z.type || 'SOLVE')}</span>
       </div>
-      <div class="wp-card-name">${esc(z.title)}</div>
+      <div class="wp-card-name" style="color:${s.textP}">${esc(z.title)}</div>
       <div class="wp-card-time" style="color:${s.textM}">${to12h(z.startTime)} — ${to12h(z.endTime)}</div>
       <div class="wp-card-blocks" style="color:${s.textM}">
         <span>FOCUS</span><span style="color:${s.textP}">${z.focusDuration || 25}m × ${z.totalCycles || 3}</span>
@@ -3236,11 +3246,12 @@ const ZoneApp = (() => {
       let zi = 0;
       cardsHTML = rows.map(count => {
         const rowZones = zones.slice(zi, zi + count);
+        const baseIdx = zi;
         zi += count;
-        return `<div class="wp-row">${rowZones.map(z => cardHTML(s, z, desktop)).join('')}</div>`;
+        return `<div class="wp-row">${rowZones.map((z, ri) => cardHTML(s, z, desktop, baseIdx + ri)).join('')}</div>`;
       }).join('');
     } else {
-      cardsHTML = zones.map(z => cardHTML(s, z, desktop)).join('');
+      cardsHTML = zones.map((z, i) => cardHTML(s, z, desktop, i)).join('');
     }
 
     el.innerHTML = `
