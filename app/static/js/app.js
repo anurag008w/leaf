@@ -15,7 +15,7 @@ const ZoneApp = (() => {
     sidebarOpen: true, fullscreen: false,
     events: [],
     stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
-    tracking: { log: [], zoneStats: {}, sessionCount: 0 },
+    tracking: { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} },
     settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker' },
     examTrack: null,
     examDates: [],
@@ -194,7 +194,8 @@ const ZoneApp = (() => {
     const session = {
       currentZoneIdx: state.currentZoneIdx,
       byZone: state.byZone,
-      dayComplete: state.dayComplete
+      dayComplete: state.dayComplete,
+      date: todayKey()
     };
     saveUserDataToServer('session', session);
     saveUserDataToServer('stats');
@@ -212,7 +213,8 @@ const ZoneApp = (() => {
     const session = {
       currentZoneIdx: state.currentZoneIdx,
       byZone: state.byZone,
-      dayComplete: state.dayComplete
+      dayComplete: state.dayComplete,
+      date: todayKey()
     };
     storage().set('onboarded', state.onboarded);
     storage().set('session', session);
@@ -350,7 +352,6 @@ const ZoneApp = (() => {
 
     // Track which zones had timer sessions per day (to avoid double-counting zone_complete)
     const zonesWithTimerToday = new Set(todayEvents.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
-    const zonesWithTimerAll = new Set(log.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
 
     const manualToday = todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
     const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
@@ -358,11 +359,6 @@ const ZoneApp = (() => {
       + todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx))
         .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
     const totalSessions = log.filter(e => e.type === 'session_complete').length;
-    const totalManual = log.filter(e => e.type === 'zone_complete' && !zonesWithTimerAll.has(e.zoneIdx)).length;
-    const totalFocusMin = log.filter(e => e.type === 'session_complete')
-      .reduce((a, e) => a + (e.duration || 0), 0)
-      + log.filter(e => e.type === 'zone_complete' && !zonesWithTimerAll.has(e.zoneIdx))
-        .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
 
     const dailyMap = {};
     log.forEach(e => {
@@ -388,11 +384,22 @@ const ZoneApp = (() => {
       }
       dailyMap[date].events.push(e);
     });
+    const totalManual = Object.values(dailyMap).reduce((s, d) => s + (d.manualDone || 0), 0);
+    const totalFocusMin = Object.values(dailyMap).reduce((s, d) => s + (d.focusMin || 0), 0);
 
     let streak = 0;
     const dates = Object.keys(dailyMap).sort().reverse();
     for (let i = 0; i < dates.length; i++) {
-      if ((dailyMap[dates[i]]?.focusMin || 0) < 30) break;
+      const dMin = dailyMap[dates[i]]?.focusMin || 0;
+      if (dMin < 30) {
+        // BUG FIX: `dailyMap` gets an entry for ANY logged event (session_start,
+        // pause, etc.), not just completed focus sessions. So today could show
+        // up here with 0 focus minutes just because a timer was started but not
+        // finished yet — that should not zero out a real, ongoing streak since
+        // today isn't "over" yet. Skip today instead of breaking on it.
+        if (dates[i] === today) continue;
+        break;
+      }
       if (i > 0) {
         const gap = (Date.parse(dates[i-1]) - Date.parse(dates[i])) / 86400000;
         if (gap > 2) break;
@@ -405,6 +412,14 @@ const ZoneApp = (() => {
       ...z, idx: i,
       ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
     }));
+
+    // Merge daily zone completion snapshots into dailyMap
+    const dz = state.tracking.dailyZones || {};
+    Object.keys(dz).forEach(date => {
+      if (!dailyMap[date]) dailyMap[date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
+      dailyMap[date].zoneCompleted = dz[date].completed;
+      dailyMap[date].dayComplete = dz[date].dayComplete;
+    });
 
     // Build month-grouped sorted entries
     const sortedEntries = Object.entries(dailyMap).sort((a, b) => b[0].localeCompare(a[0]));
@@ -443,7 +458,12 @@ const ZoneApp = (() => {
       running: false, completed: false,
       blockDone: [],
       cycle: 0, blockType: 'focus',
-      elapsed: 0
+      elapsed: 0,
+      zoneElapsed: 0, // cumulative time spent in this zone across ALL blocks today;
+                       // unlike `elapsed`, this does NOT reset on focus<->break transitions.
+                       // Used to check z.timeLimit ("Max Time"), which is a whole-zone cap.
+      lastTick: null   // wall-clock ms timestamp of the last tick, used to correct for
+                        // time that passes while the tab/page is closed or backgrounded.
     };
   }
 
@@ -464,16 +484,20 @@ const ZoneApp = (() => {
   function timerTick() {
     const zs = getCurrentZs();
     if (!zs || !zs.running) { document.title = 'Zone — Study OS'; return; }
+    const now = Date.now();
+    const delta = zs.lastTick ? Math.max(1, Math.round((now - zs.lastTick) / 1000)) : 1;
+    zs.lastTick = now;
+    zs.remaining = Math.max(0, zs.remaining - delta);
+    zs.elapsed = (zs.elapsed || 0) + delta;
+    zs.zoneElapsed = (zs.zoneElapsed || 0) + delta;
     if (zs.remaining <= 0) {
       stopTimer();
       zs.running = false;
       handleBlockComplete();
       return;
     }
-    zs.remaining--;
-    zs.elapsed = (zs.elapsed || 0) + 1;
     const z = getZone(state.currentZoneIdx);
-    if (z && z.timeLimit && (zs.elapsed >= z.timeLimit * 60)) {
+    if (z && z.timeLimit && (zs.zoneElapsed >= z.timeLimit * 60)) {
       stopTimer();
       zs.running = false;
       if (zs.blockType === 'focus') {
@@ -502,6 +526,7 @@ const ZoneApp = (() => {
     if (!zs || zs.completed) return;
     notifRequest();
     zs.running = true;
+    zs.lastTick = Date.now();
     logEvent('session_start', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle });
     stopTimer();
     state.timerHandle = setInterval(timerTick, 1000);
@@ -715,15 +740,16 @@ const ZoneApp = (() => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const zones = getZones();
-    const zoneStats = state.tracking.zoneStats || {};
+    const todayLog = state.tracking.log.filter(e => e.date === todayKey());
     let items = '';
     let hasDone = false, hasSkipped = false;
     zones.forEach((z, i) => {
-      const zs = zoneStats[i] || {};
-      if (zs.completes > 0 && !zs.doneNoTimer) {
+      const zoneCompleteEvent = todayLog.find(e => e.type === 'zone_complete' && e.zoneIdx === i);
+      const hadTimerToday = todayLog.some(e => e.type === 'session_complete' && e.zoneIdx === i);
+      if (zoneCompleteEvent && hadTimerToday) {
         if (!hasDone) { items += '<div style="font-size:10px;color:var(--accent-lecture);font-family:var(--mono);letter-spacing:1px;margin-bottom:6px">DONE (TIMER)</div>'; hasDone = true; }
         items += `<button class="ctl" style="width:100%;padding:12px;margin-bottom:6px;text-align:left;font-size:13px;border-left:4px solid var(--accent-lecture)" onclick="ZoneApp.continueSkippedZone(${i});this.closest('.modal-overlay').remove()">🏁 ${esc(z.title)} <span style="font-size:10px;color:var(--text-muted)">redo</span></button>`;
-      } else if (zs.doneNoTimer > 0) {
+      } else if (zoneCompleteEvent) {
         if (!hasDone) { items += '<div style="font-size:10px;color:var(--accent-suc);font-family:var(--mono);letter-spacing:1px;margin-bottom:6px">DONE (MANUAL)</div>'; hasDone = true; }
         items += `<button class="ctl" style="width:100%;padding:12px;margin-bottom:6px;text-align:left;font-size:13px;border-left:4px solid var(--accent-suc)" onclick="ZoneApp.continueSkippedZone(${i});this.closest('.modal-overlay').remove()">✓ ${esc(z.title)} <span style="font-size:10px;color:var(--text-muted)">manual · redo</span></button>`;
       } else {
@@ -978,7 +1004,7 @@ const ZoneApp = (() => {
       <div class="console-toolbar">
         <div class="ct-left">
           <button class="ct-btn sidebar-toggle" onclick="ZoneApp.toggleSidebar()" title="Toggle sidebar">${state.sidebarOpen ? '☰' : '☰'}</button>
-          <span class="ct-label">ZONE ${String(cur.id).padStart(2,'0')} · ${to12h(cur.startTime)} — ${to12h(cur.endTime)}</span>
+          <span class="ct-label">ZONE ${String(cur.id ?? state.currentZoneIdx + 1).padStart(2,'0')} · ${to12h(cur.startTime)} — ${to12h(cur.endTime)}</span>
         </div>
         <div class="ct-actions">
           <button class="ct-btn fs-toggle" onclick="ZoneApp.toggleFullscreen()" title="Fullscreen">⛶</button>
@@ -1048,6 +1074,14 @@ const ZoneApp = (() => {
   }
 
   function selectZone(idx) {
+    if (idx === state.currentZoneIdx) return;
+    // BUG FIX: the shared timer interval only ever ticks the CURRENT zone
+    // (via getCurrentZs()). Switching away used to leave the old zone's
+    // `running` flag stuck at true forever, even though it had silently
+    // stopped counting down — misleading UI (still shows "running"/PAUSE
+    // button) and no pause event ever logged for it. Explicitly pause it.
+    const prevZs = getCurrentZs();
+    if (prevZs && prevZs.running) timerPause();
     state.currentZoneIdx = idx;
     renderConsoleTab();
   }
@@ -1188,6 +1222,32 @@ const ZoneApp = (() => {
     renderAll();
   }
 
+  function rebuildZoneStatsFromLog(idx) {
+    // Rebuilds zoneStats[idx] purely from state.tracking.log, using the same
+    // accumulation rules as logEvent(). Used after removing some of a zone's
+    // log entries (e.g. resetZone) so remaining history stays accurate.
+    const stats = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+    const zoneLog = state.tracking.log.filter(e => e.zoneIdx === idx);
+    // A zone_complete event came from the normal timer flow (completeZone)
+    // if that zone had a session_complete that same day; otherwise it came
+    // from markZoneComplete (manual, no timer) — same test getTrackingStats() uses.
+    const datesWithSession = new Set(zoneLog.filter(e => e.type === 'session_complete').map(e => e.date));
+    zoneLog.forEach(e => {
+      if (e.type === 'session_complete') {
+        stats.sessions++;
+        stats.totalMin += (e.duration || getZone(idx)?.focusDuration || 25);
+      } else if (e.type === 'skip_block' || e.type === 'skip_zone') {
+        stats.skips++;
+      } else if (e.type === 'pause') {
+        stats.pauses++;
+      } else if (e.type === 'zone_complete') {
+        if (datesWithSession.has(e.date)) stats.completes++;
+        else stats.doneNoTimer++;
+      }
+    });
+    state.tracking.zoneStats[idx] = stats;
+  }
+
   function resetZone(idx) {
     const z = getZone(idx);
     const zs = state.byZone[idx];
@@ -1233,8 +1293,11 @@ const ZoneApp = (() => {
     });
     state.tracking.log = state.tracking.log.filter(e => !(e.zoneIdx === idx && e.date === today));
 
-    // Reset zone stats
-    state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
+    // BUG FIX: this used to hard-reset zoneStats[idx] to all zeros — wiping
+    // out ALL-TIME analytics for the zone (sessions/skips/pauses/totalMin/
+    // completes across every previous day), even though only TODAY's log
+    // entries were actually removed above. Rebuild from what's left instead.
+    rebuildZoneStatsFromLog(idx);
 
     // Reset timer state
     zs.running = false;
@@ -1244,6 +1307,8 @@ const ZoneApp = (() => {
     zs.remaining = dur * 60;
     zs.total = dur * 60;
     zs.elapsed = 0;
+    zs.zoneElapsed = 0;
+    zs.lastTick = null;
     if (state.dayComplete) state.dayComplete = false;
     saveState();
     renderAll();
@@ -1506,11 +1571,13 @@ const ZoneApp = (() => {
     const ov = btn.closest('.modal-overlay');
     const title = ov.querySelector('#ev-title').value.trim();
     if (!title) { toast('Please enter a title', 'warning'); return; }
+    const dateVal = ov.querySelector('#ev-date').value;
+    if (!dateVal) { toast('Please select a date', 'warning'); return; }
     const colors = { lecture: '#38BDF8', test: '#F26B6B', coaching: '#FBBF24', break: '#34D399', meal: '#A78BFA', personal: '#F472B6', travel: '#FB923C', meeting: '#A78BFA' };
     const type = ov.querySelector('#ev-type').value;
     if (!Array.isArray(state.events)) state.events = [];
     state.events.push({
-      id: uid(), title, date: ov.querySelector('#ev-date').value,
+      id: uid(), title, date: dateVal,
       start: ov.querySelector('#ev-start').value, end: ov.querySelector('#ev-end').value,
       type, color: colors[type] || '#38BDF8',
       notes: ov.querySelector('#ev-notes')?.value?.trim() || ''
@@ -1563,10 +1630,12 @@ const ZoneApp = (() => {
     if (!ev) return;
     const title = ov.querySelector('#ev-edit-title').value.trim();
     if (!title) { toast('Title cannot be empty', 'warning'); return; }
+    const dateVal = ov.querySelector('#ev-edit-date').value;
+    if (!dateVal) { toast('Please select a date', 'warning'); return; }
     const colors = { lecture: '#38BDF8', test: '#F26B6B', coaching: '#FBBF24', break: '#34D399', meal: '#A78BFA', personal: '#F472B6', travel: '#FB923C', meeting: '#A78BFA' };
     const type = ov.querySelector('#ev-edit-type').value;
     ev.title = title;
-    ev.date = ov.querySelector('#ev-edit-date').value;
+    ev.date = dateVal;
     ev.start = ov.querySelector('#ev-edit-start').value;
     ev.end = ov.querySelector('#ev-edit-end').value;
     ev.type = type;
@@ -1751,10 +1820,11 @@ const ZoneApp = (() => {
                 <th>Manual</th>
                 <th>Skips</th>
                 <th>Rate</th>
+                <th>Zones</th>
               </tr></thead>
               <tbody>
                 ${ts.monthGroups.map(g => `
-                  <tr class="month-row"><td colspan="6">${esc(g.label)} <span class="month-total">${g.totalFocus}m · ${g.totalSessions} timer · ${g.totalManual} manual · ${g.totalSkips} skips</span></td></tr>
+                  <tr class="month-row"><td colspan="7">${esc(g.label)} <span class="month-total">${g.totalFocus}m · ${g.totalSessions} timer · ${g.totalManual} manual · ${g.totalSkips} skips</span></td></tr>
                   ${g.days.map(d => {
                     const totalDone = d.sessions + d.manualDone;
                     const total = totalDone + d.skips;
@@ -1763,6 +1833,10 @@ const ZoneApp = (() => {
                     const label = dateObj.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
                     const isToday = d.date === todayKey();
                     const minBar = Math.min(d.focusMin, 200);
+                    const zoneDots = d.zoneCompleted ? d.zoneCompleted.map((c, zi) => {
+                      const zColor = ts.zoneData[zi]?.color || '#666';
+                      return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c ? zColor : '#333'};margin:0 1px;opacity:${c ? 1 : 0.3}" title="${esc(ts.zoneData[zi]?.title || 'Zone ' + (zi+1))}: ${c ? 'Done' : '—'}"></span>`;
+                    }).join('') : '—';
                     return `<tr class="${isToday ? 'today-row' : ''}" onclick="ZoneApp.showDayReport('${d.date}')" style="cursor:pointer">
                       <td class="dt-date">${label}</td>
                       <td class="dt-focus">
@@ -1775,6 +1849,7 @@ const ZoneApp = (() => {
                       <td class="dt-num ${d.manualDone > 0 ? 'dt-manual' : ''}">${d.manualDone || '—'}</td>
                       <td class="dt-num ${d.skips > 2 ? 'dt-warn' : ''}">${d.skips}</td>
                       <td class="dt-num">${rate}</td>
+                      <td class="dt-zones">${zoneDots}</td>
                     </tr>`;
                   }).join('')}
                 `).join('')}
@@ -1836,9 +1911,10 @@ const ZoneApp = (() => {
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
     const events = log.filter(e => e.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     const timerSessions = events.filter(e => e.type === 'session_complete').length;
-    const manualDone = events.filter(e => e.type === 'zone_complete').length;
+    const zonesWithTimerPerDay = new Set(events.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
+    const manualDone = events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).length;
     const totalFocus = events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
-      + events.filter(e => e.type === 'zone_complete').reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
+      + events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
     const sessions = timerSessions + manualDone;
     const skips = events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
     const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
@@ -1864,6 +1940,23 @@ const ZoneApp = (() => {
           <div class="dr-stat"><span class="dr-num">${skips}</span><span class="dr-lbl">Skips</span></div>
           <div class="dr-stat"><span class="dr-num">${rate}%</span><span class="dr-lbl">Completion</span></div>
         </div>
+        ${(() => {
+          const dz = (state.tracking.dailyZones || {})[date];
+          if (!dz) return '';
+          return `<div style="font-size:12px;font-weight:600;margin:16px 0 8px;letter-spacing:1px">Zone Completion</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${
+            dz.completed.map((c, i) => {
+              const z = zones[i];
+              if (!z) return '';
+              const color = c ? (z.color || '#34D399') : '#333';
+              const label = c ? 'Done' : 'Skipped';
+              return `<span style="display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:${color}22;border:1px solid ${color};font-size:11px;font-family:var(--mono);color:${c ? 'var(--text-primary)' : 'var(--text-muted)'}">
+                <span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>
+                ${esc(z.title)} <span style="font-size:9px;color:var(--text-muted)">${label}</span>
+              </span>`;
+            }).join('')
+          }</div>`;
+        })()}
         <div style="font-size:12px;font-weight:600;margin:16px 0 10px;letter-spacing:1px">Timeline</div>
         <div class="event-timeline" style="max-height:300px;overflow-y:auto">
           ${events.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No activity on this day</div>'
@@ -2074,7 +2167,7 @@ const ZoneApp = (() => {
       const yr = new Date(target).getFullYear();
       const start = new Date(yr + '-01-01').getTime();
       const total = target - start;
-      const frac = diff > 0 ? diff / total : 0;
+      const frac = diff > 0 ? Math.min(1, diff / total) : 0;
       const r = 80, c = 2 * Math.PI * r, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -2165,7 +2258,7 @@ const ZoneApp = (() => {
         const yr = new Date(target).getFullYear();
         const start = new Date(yr + '-01-01').getTime();
         const total = target - start;
-        const frac = diff > 0 ? diff / total : 0;
+        const frac = diff > 0 ? Math.min(1, diff / total) : 0;
         const c = 2 * Math.PI * 90;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
@@ -2914,7 +3007,8 @@ const ZoneApp = (() => {
           toast('Invalid config: no zones found', 'error'); return;
         }
         state.config = data;
-        (state.config.zones || []).forEach(z => {
+        (state.config.zones || []).forEach((z, i) => {
+          if (z.id == null) z.id = i + 1;
           if (z.timeLimit == null) z.timeLimit = z.type === 'buffer' ? 90 : 180;
           if (!z.cycleTitles) z.cycleTitles = [];
         });
@@ -2930,7 +3024,7 @@ const ZoneApp = (() => {
   function clearStats() {
     if (confirm('Clear all study statistics?')) {
       state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
-      state.tracking = { log: [], zoneStats: {}, sessionCount: 0 };
+      state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
       storage().set('stats', state.stats);
       storage().set('tracking', state.tracking);
       renderTabBody();
@@ -2941,7 +3035,7 @@ const ZoneApp = (() => {
   async function resetAll() {
     if (!confirm('Reset all data? This cannot be undone.')) return;
     state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
-    state.tracking = { log: [], zoneStats: {}, sessionCount: 0 };
+    state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
     state.events = [];
     state.config = { identity: {}, zones: [] };
     state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true };
@@ -3279,13 +3373,43 @@ const ZoneApp = (() => {
       state.onboarded = true;
       const sess = loadSession();
       if (sess && sess.byZone) {
-        state.byZone = sess.byZone;
-        if (sess.currentZoneIdx != null) state.currentZoneIdx = sess.currentZoneIdx;
-        if (state.currentZoneIdx >= getZones().length || state.currentZoneIdx < 0) state.currentZoneIdx = 0;
-        state.dayComplete = !!sess.dayComplete;
-        const zs = getCurrentZs();
-        if (zs && zs.running) {
-          state.timerHandle = setInterval(timerTick, 1000);
+        const today = todayKey();
+        if (sess.date && sess.date !== today) {
+          // Save previous day's zone completion snapshot
+          const zones = getZones();
+          if (zones.length > 0) {
+            if (!state.tracking.dailyZones) state.tracking.dailyZones = {};
+            if (!state.tracking.dailyZones[sess.date]) {
+              state.tracking.dailyZones[sess.date] = {
+                completed: zones.map((z, i) => !!(sess.byZone[i]?.completed)),
+                dayComplete: !!sess.dayComplete
+              };
+            }
+          }
+          state.dayComplete = false;
+          state.currentZoneIdx = 0;
+          rebuildZoneStates();
+        } else {
+          state.byZone = sess.byZone;
+          if (sess.currentZoneIdx != null) state.currentZoneIdx = sess.currentZoneIdx;
+          if (state.currentZoneIdx >= getZones().length || state.currentZoneIdx < 0) state.currentZoneIdx = 0;
+          state.dayComplete = !!sess.dayComplete;
+          const zs = getCurrentZs();
+          if (zs && zs.running) {
+            const elapsedSec = zs.lastTick ? Math.max(0, Math.floor((Date.now() - zs.lastTick) / 1000)) : 0;
+            if (elapsedSec > 0) {
+              zs.elapsed = (zs.elapsed || 0) + elapsedSec;
+              zs.zoneElapsed = (zs.zoneElapsed || 0) + elapsedSec;
+              zs.remaining = Math.max(0, zs.remaining - elapsedSec);
+            }
+            zs.lastTick = Date.now();
+            if (zs.remaining <= 0) {
+              zs.running = false;
+              handleBlockComplete();
+            } else {
+              state.timerHandle = setInterval(timerTick, 1000);
+            }
+          }
         }
       } else {
         rebuildZoneStates();
