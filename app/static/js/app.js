@@ -16,7 +16,7 @@ const ZoneApp = (() => {
     events: [],
     stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
     tracking: { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} },
-    settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker' },
+    settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker', autoStartBreaks: true, flowMode: false, timerPreset: 'custom', soundPack: 'default' },
     examTrack: null,
     examDates: [],
     wpStyle: 'mission_control', wpSize: 'mobile',
@@ -25,7 +25,7 @@ const ZoneApp = (() => {
 
   let $root, $toastContainer;
 
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const uid = () => Math.random().toString(36).slice(2,9);
 
   // Robust JSON parse for user-imported files: strips UTF-8 BOM (common from
@@ -130,30 +130,33 @@ const ZoneApp = (() => {
 
   function isGuest() { return !!localStorage.getItem('zone_guest'); }
 
-  const EXAM_DATES_BY_TRACK = {
+  const EXAM_DATES_BY_TRACK = (year = null) => {
+    const y = year || new Date().getFullYear() + 1;
+    return {
     JEE: [
-      { id: 'jee_main', name: 'JEE Main 2027', defaultDate: '2027-01-24', icon: '📝' },
-      { id: 'jee_adv', name: 'JEE Advanced 2027', defaultDate: '2027-05-23', icon: '🎯' }
+      { id: 'jee_main', name: `JEE Main ${y}`, defaultDate: `${y}-01-24`, icon: '📝' },
+      { id: 'jee_adv', name: `JEE Advanced ${y}`, defaultDate: `${y}-05-23`, icon: '🎯' }
     ],
     NEET: [
-      { id: 'neet', name: 'NEET UG 2027', defaultDate: '2027-05-02', icon: '⚕️' }
+      { id: 'neet', name: `NEET UG ${y}`, defaultDate: `${y}-05-02`, icon: '⚕️' }
     ],
     UPSC: [
-      { id: 'upsc_pre', name: 'UPSC Prelims 2027', defaultDate: '2027-06-13', icon: '📋' },
-      { id: 'upsc_main', name: 'UPSC Mains 2027', defaultDate: '2027-09-19', icon: '📚' }
+      { id: 'upsc_pre', name: `UPSC Prelims ${y}`, defaultDate: `${y}-06-13`, icon: '📋' },
+      { id: 'upsc_main', name: `UPSC Mains ${y}`, defaultDate: `${y}-09-19`, icon: '📚' }
     ],
     GATE: [
-      { id: 'gate', name: 'GATE 2027', defaultDate: '2027-02-07', icon: '⚙️' }
+      { id: 'gate', name: `GATE ${y}`, defaultDate: `${y}-02-07`, icon: '⚙️' }
     ],
     CA: [
-      { id: 'ca', name: 'CA Exams 2027', defaultDate: '2027-05-15', icon: '📊' }
+      { id: 'ca', name: `CA Exams ${y}`, defaultDate: `${y}-05-15`, icon: '📊' }
     ],
     BOARDS: [
-      { id: 'boards', name: 'Board Exams 2027', defaultDate: '2027-03-01', icon: '🏫' }
+      { id: 'boards', name: `Board Exams ${y}`, defaultDate: `${y}-03-01`, icon: '🏫' }
     ],
     CUSTOM: [
-      { id: 'custom', name: 'Target Date', defaultDate: '2027-06-01', icon: '🎯' }
+      { id: 'custom', name: 'Target Date', defaultDate: `${y}-06-01`, icon: '🎯' }
     ]
+  };
   };
 
   function storage() {
@@ -255,12 +258,68 @@ const ZoneApp = (() => {
     } catch {}
   }
 
+  const SOUND_PACKS = {
+    default: { label: 'Default', transition: [660,120,0,880,140,140], breakstart: [500,180,0], complete: [660,120,0,880,120,150,1046,220,300], tick: [440,30,0,0.03] },
+    soft: { label: 'Soft', transition: [440,200,0,550,200,200], breakstart: [330,250,0], complete: [440,200,0,550,200,150,660,300,300], tick: [330,50,0,0.02] },
+    digital: { label: 'Digital', transition: [800,80,0,1000,80,80], breakstart: [600,100,0], complete: [800,80,0,1000,80,80,1200,150,160], tick: [600,20,0,0.02] },
+    nature: { label: 'Nature (Silent)', transition: [], breakstart: [], complete: [], tick: [] }
+  };
+
   function chime(kind) {
     if (!state.settings.soundEnabled) return;
-    if (kind === 'transition') { beep(660,120,0); beep(880,140,140); }
-    if (kind === 'breakstart') { beep(500,180,0); }
-    if (kind === 'complete') { beep(660,120,0); beep(880,120,150); beep(1046,220,300); }
-    if (kind === 'tick') { beep(440,30,0,0.03); }
+    const pack = SOUND_PACKS[state.settings.soundPack] || SOUND_PACKS.default;
+    const seq = pack[kind];
+    if (!seq || seq.length === 0) return;
+    for (let i = 0; i < seq.length; i += 4) {
+      beep(seq[i], seq[i+1], seq[i+2], seq[i+3] ?? 0.05);
+    }
+  }
+
+  const TIMER_PRESETS = {
+    custom: { label: 'Custom', focus: 25, break: 5, long: 15, cycles: 4 },
+    pomodoro: { label: 'Pomodoro 25/5', focus: 25, break: 5, long: 15, cycles: 4 },
+    power: { label: 'Power 50/10', focus: 50, break: 10, long: 20, cycles: 4 },
+    deep: { label: 'Deep 90/20', focus: 90, break: 20, long: 30, cycles: 3 }
+  };
+
+  function applyPreset(presetKey) {
+    if (presetKey === 'custom') return;
+    const p = TIMER_PRESETS[presetKey];
+    if (!p) return;
+    state.settings.timerPreset = presetKey;
+    getZones().forEach(z => {
+      z.focusDuration = p.focus;
+      z.breakDuration = p.break;
+      z.longBreakDuration = p.long;
+      z.totalCycles = p.cycles;
+    });
+    // Reset current zone state so new durations take effect
+    getZones().forEach((_, i) => {
+      const zs = state.byZone[i];
+      if (zs) {
+        zs.remaining = p.focus * 60;
+        zs.total = p.focus * 60;
+        zs.elapsed = 0;
+        zs.cycle = 0;
+        zs.blockType = 'focus';
+        zs.completed = false;
+        zs.running = false;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
+      }
+    });
+    stopTimer();
+    saveState();
+    toast(`Applied "${p.label}" preset to all zones`, 'success');
+    renderAll();
+  }
+
+  function setSetting(key, value) {
+    state.settings[key] = value;
+    storage().set('settings', state.settings);
+    if (!isGuest()) saveUserDataToServer('settings');
+    renderTabBody();
+    if (key === 'timerPreset') applyPreset(value);
   }
 
   function notifSend(title, body) {
@@ -357,7 +416,9 @@ const ZoneApp = (() => {
     const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
       .reduce((a, e) => a + (e.duration || 0), 0)
       + todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx))
-        .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
+        .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0)
+      + todayEvents.filter(e => e.type === 'overtime')
+        .reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
     const totalSessions = log.filter(e => e.type === 'session_complete').length;
 
     const dailyMap = {};
@@ -381,6 +442,9 @@ const ZoneApp = (() => {
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
         dailyMap[date].skips++;
+      }
+      if (e.type === 'overtime') {
+        dailyMap[date].focusMin += Math.round((e.seconds || 0) / 60);
       }
       dailyMap[date].events.push(e);
     });
@@ -455,7 +519,7 @@ const ZoneApp = (() => {
     return {
       blockIdx: 0, remaining: (zone.focusDuration || 25) * 60,
       total: (zone.focusDuration || 25) * 60,
-      running: false, completed: false,
+      running: false, completed: false, blockComplete: false, overtimeSeconds: 0,
       blockDone: [],
       cycle: 0, blockType: 'focus',
       elapsed: 0,
@@ -487,6 +551,35 @@ const ZoneApp = (() => {
     const now = Date.now();
     const delta = zs.lastTick ? Math.max(1, Math.round((now - zs.lastTick) / 1000)) : 1;
     zs.lastTick = now;
+
+    if (zs.blockComplete) {
+      zs.overtimeSeconds = (zs.overtimeSeconds || 0) + delta;
+      zs.elapsed = (zs.elapsed || 0) + delta;
+      zs.zoneElapsed = (zs.zoneElapsed || 0) + delta;
+      const z = getZone(state.currentZoneIdx);
+      if (z && z.timeLimit && (zs.zoneElapsed >= z.timeLimit * 60)) {
+        stopTimer();
+        zs.running = false;
+        if (zs.overtimeSeconds > 0) {
+          logEvent('overtime', { zoneIdx: state.currentZoneIdx, seconds: zs.overtimeSeconds, cycle: zs.cycle });
+          const extraMin = Math.round(zs.overtimeSeconds / 60);
+          if (extraMin > 0) {
+            state.stats.totalFocusMin += extraMin;
+            const key = todayKey();
+            if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+            state.stats.history[key].focusMin += extraMin;
+          }
+        }
+        toast(`Time limit reached for "${z.title}" — auto-completing`, 'warning');
+        completeZone();
+        return;
+      }
+      saveState();
+      updateTimerDisplay();
+      document.title = `+${fmtTime(zs.overtimeSeconds)} — ${getZone(state.currentZoneIdx)?.title || 'Zone'} — Study OS`;
+      return;
+    }
+
     zs.remaining = Math.max(0, zs.remaining - delta);
     zs.elapsed = (zs.elapsed || 0) + delta;
     zs.zoneElapsed = (zs.zoneElapsed || 0) + delta;
@@ -514,7 +607,7 @@ const ZoneApp = (() => {
       completeZone();
       return;
     }
-    if (zs.remaining < 300 && zs.remaining % 60 === 0) chime('tick');
+    if (zs.remaining < 300 && Math.ceil((zs.remaining + delta) / 60) > Math.ceil(zs.remaining / 60)) chime('tick');
     saveState();
     updateTimerDisplay();
     document.title = `${fmtTime(zs.remaining)} — ${z ? z.title : 'Zone'} — Study OS`;
@@ -553,6 +646,8 @@ const ZoneApp = (() => {
     if (!confirm(`Reset timer for ${z.title}?`)) return;
     stopTimer();
     zs.running = false;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
     const dur = zs.blockType === 'focus' ? (z.focusDuration || 25) * 60 : (getBreakDur(z, zs.cycle) * 60);
     zs.remaining = dur;
     zs.total = dur;
@@ -563,10 +658,10 @@ const ZoneApp = (() => {
   function timerSkip() {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
-    if (!zs) return;
+    if (!z || !zs) return;
     stopTimer();
     zs.running = false;
-    if (zs.blockType === 'focus') {
+    if (zs.blockType === 'focus' && !zs.blockComplete) {
       const partial = Math.round(((z.focusDuration || 25) * 60 - zs.remaining) / 60);
       if (partial >= 1) {
         state.stats.totalFocusMin += partial;
@@ -578,6 +673,8 @@ const ZoneApp = (() => {
     }
     zs.remaining = 0;
     zs.elapsed = 0;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
     if (zs.blockType === 'focus') {
       zs.blockType = 'break';
       const bdur = getBreakDur(z, zs.cycle) * 60;
@@ -594,6 +691,38 @@ const ZoneApp = (() => {
       zs.total = (z.focusDuration || 25) * 60;
       renderAll();
     }
+  }
+
+  function takeBreak() {
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z || !zs) return;
+
+    const overtimeSec = zs.overtimeSeconds || 0;
+    if (overtimeSec > 0) {
+      logEvent('overtime', { zoneIdx: state.currentZoneIdx, seconds: overtimeSec, cycle: zs.cycle });
+      const extraMin = Math.round(overtimeSec / 60);
+      if (extraMin > 0) {
+        state.stats.totalFocusMin += extraMin;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += extraMin;
+      }
+    }
+
+    stopTimer();
+    zs.running = false;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
+    zs.blockType = 'break';
+    const bdur = getBreakDur(z, zs.cycle) * 60;
+    zs.remaining = bdur;
+    zs.total = bdur;
+    zs.elapsed = 0;
+    chime('breakstart');
+    saveState();
+    renderAll();
+    if (state.settings.autoStartBreaks) timerStart();
   }
 
   function handleBlockComplete(actualMin) {
@@ -617,13 +746,25 @@ const ZoneApp = (() => {
       state.stats.history[key].sessions++;
       saveState();
 
-      zs.blockType = 'break';
-      const bdur = getBreakDur(z, zs.cycle) * 60;
-      zs.remaining = bdur;
-      zs.total = bdur;
-      zs.elapsed = 0;
-      chime('breakstart');
-      renderAll();
+      if (state.settings.autoStartBreaks) {
+        zs.blockType = 'break';
+        const bdur = getBreakDur(z, zs.cycle) * 60;
+        zs.remaining = bdur;
+        zs.total = bdur;
+        zs.elapsed = 0;
+        chime('breakstart');
+        renderAll();
+        timerStart();
+      } else {
+        zs.blockComplete = true;
+        zs.overtimeSeconds = 0;
+        zs.remaining = 0;
+        zs.running = true;
+        zs.lastTick = Date.now();
+        stopTimer();
+        state.timerHandle = setInterval(timerTick, 1000);
+        renderAll();
+      }
     } else {
       chime('transition');
       notifSend('Break Over!', 'Time to focus again.');
@@ -635,11 +776,11 @@ const ZoneApp = (() => {
         completeZone();
         return;
       }
-      const dur = (z.focusDuration || 25) * 60;
-      zs.remaining = dur;
-      zs.total = dur;
+      zs.remaining = (z.focusDuration || 25) * 60;
+      zs.total = (z.focusDuration || 25) * 60;
       zs.elapsed = 0;
       renderAll();
+      if (state.settings.flowMode) timerStart();
     }
   }
 
@@ -649,7 +790,7 @@ const ZoneApp = (() => {
     logEvent('zone_complete', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
     if (z) toast(`Zone ${z.title} complete! 🎉`, 'success');
     stopTimer();
-    if (zs) { zs.running = false; zs.completed = true; }
+    if (zs) { zs.running = false; zs.completed = true; zs.blockComplete = false; zs.overtimeSeconds = 0; }
     saveState();
     if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); return; }
     const next = state.currentZoneIdx + 1;
@@ -674,7 +815,7 @@ const ZoneApp = (() => {
     state.stats.history[key].sessions++;
     if (z) { const d = z.focusDuration || 25; state.stats.totalFocusMin += d; state.stats.history[key].focusMin += d; }
     saveState();
-    if (zs) { zs.running = false; zs.completed = true; stopTimer(); }
+    if (zs) { zs.running = false; zs.completed = true; zs.blockComplete = false; zs.overtimeSeconds = 0; stopTimer(); }
     if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); renderAll(); return; }
     const next = idx + 1;
     if (next < getZones().length) {
@@ -912,7 +1053,7 @@ const ZoneApp = (() => {
 
     if (state.dayComplete) {
       const todayEvents = getTodayLog();
-      const focusMin = todayEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+      const focusMin = todayEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0) + todayEvents.filter(e => e.type === 'overtime').reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
       const sessions = todayEvents.filter(e => e.type === 'session_complete').length;
       const pauses = todayEvents.filter(e => e.type === 'pause').length;
       const stops = todayEvents.filter(e => e.type === 'stop').length;
@@ -935,15 +1076,15 @@ const ZoneApp = (() => {
         </div>`;
       }).join('');
 
-      const eventIcon = { session_start:'▶', session_complete:'✓', skip_block:'⏭', pause:'⏸', skip_zone:'⏩', zone_complete:'🏁', break:'☕', stop:'⏹' };
-      const eventLbl = { session_start:'Started', session_complete:'Complete', skip_block:'Skip block', pause:'Paused', skip_zone:'Skip zone', zone_complete:'Zone done', break:'Break', stop:'Stopped' };
+      const eventIcon = { session_start:'▶', session_complete:'✓', skip_block:'⏭', pause:'⏸', skip_zone:'⏩', zone_complete:'🏁', break:'☕', stop:'⏹', overtime:'⏱' };
+      const eventLbl = { session_start:'Started', session_complete:'Complete', skip_block:'Skip block', pause:'Paused', skip_zone:'Skip zone', zone_complete:'Zone done', break:'Break', stop:'Stopped', overtime:'Overtime' };
       const timeline = todayEvents.slice(-200).reverse().map(e => `
-        <div class="dc-event" onclick="ZoneApp.showDayDetail('${e.id}')" title="${e.type.replace(/_/g,' ')}${e.duration ? ' · '+e.duration+'min' : ''}">
-          <span class="dc-ei" style="background:${e.type === 'session_complete' ? 'var(--accent-lecture)' : e.type === 'pause' || e.type === 'stop' ? 'var(--accent-solve)' : 'var(--bg-3)'}">${eventIcon[e.type] || '•'}</span>
+        <div class="dc-event" onclick="ZoneApp.showDayDetail('${e.id}')" title="${e.type.replace(/_/g,' ')}${e.duration ? ' · '+e.duration+'min' : ''}${e.seconds ? ' · '+e.seconds+'s' : ''}">
+          <span class="dc-ei" style="background:${e.type === 'session_complete' ? 'var(--accent-lecture)' : e.type === 'pause' || e.type === 'stop' ? 'var(--accent-solve)' : e.type === 'overtime' ? 'var(--accent-suc)' : 'var(--bg-3)'}">${eventIcon[e.type] || '•'}</span>
           <span class="dc-et">${new Date(e.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>
           <span class="dc-el">${eventLbl[e.type] || e.type}</span>
           <span class="dc-ez">${e.zoneName || (e.zoneIdx !== undefined ? `Z${e.zoneIdx+1}` : '')}</span>
-          ${e.duration ? `<span class="dc-ed">${e.duration}m</span>` : ''}
+          ${e.duration ? `<span class="dc-ed">${e.duration}m</span>` : ''}${e.seconds ? `<span class="dc-ed">+${e.seconds}s</span>` : ''}
         </div>`).join('');
 
       body.innerHTML = `
@@ -1117,21 +1258,21 @@ const ZoneApp = (() => {
 
     const color = zs.blockType === 'break' ? 'var(--accent-break)' : z.color;
     const total = zs.total || 1;
-    const frac = zs.completed ? 1 : (total - zs.remaining) / total;
+    const frac = (zs.completed || zs.blockComplete) ? 1 : (total - zs.remaining) / total;
     const cycles = z.totalCycles || 3;
 
     const dotsEl = document.getElementById('cycleDots');
     if (dotsEl) {
       dotsEl.innerHTML = Array.from({length: cycles}, (_, i) =>
-        `<span class="cdot ${i < zs.cycle ? 'filled' : (i === zs.cycle && zs.blockType === 'focus' ? 'live' : '')}" style="--zc:${z.color}"></span>`
+        `<span class="cdot ${i < zs.cycle ? 'filled' : (i === zs.cycle && (zs.blockType === 'focus' || zs.blockComplete) ? 'live' : '')}" style="--zc:${z.color}"></span>`
       ).join('');
     }
 
     let tlHTML = '';
     for (let i = 0; i < cycles; i++) {
-      const isCurFocus = i === zs.cycle && zs.blockType === 'focus' && !zs.completed;
+      const isCurFocus = i === zs.cycle && zs.blockType === 'focus' && !zs.completed && !zs.blockComplete;
       const isCurBreak = i === zs.cycle && zs.blockType === 'break' && !zs.completed;
-      const focusDone = i < zs.cycle || (i === zs.cycle && zs.blockType === 'break');
+      const focusDone = i < zs.cycle || (i === zs.cycle && zs.blockType === 'break') || (i === zs.cycle && zs.blockComplete);
       const breakDone = i < zs.cycle;
       const focusPct = isCurFocus ? Math.round((1 - zs.remaining / ((z.focusDuration || 25) * 60)) * 100) : (focusDone ? 100 : 0);
       const breakDur = getBreakDur(z, i);
@@ -1159,14 +1300,17 @@ const ZoneApp = (() => {
       tlHTML += `</div>`;
     }
 
+    const ringTime = zs.blockComplete ? '+' + fmtTime(zs.overtimeSeconds || 0) : (zs.completed ? '✓ DONE' : fmtTime(zs.remaining));
+    const ringLabel = zs.blockComplete ? 'OVERTIME · ' + (state.settings.autoStartBreaks ? 'auto' : 'TAKE BREAK') : (zs.completed ? 'ZONE COMPLETE' : (zs.blockType === 'focus' ? 'FOCUS' : 'BREAK') + ' · ' + cycleTitle(z, zs.cycle));
+
     area.innerHTML = `
       <div class="timer-area">
         <div class="ring-section">
           <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
-            ${ringSVG(zs.completed ? 1 : frac, color)}
+            ${ringSVG(frac, color)}
             <div class="ring-center">
-              <div class="ring-time mono" style="color:${color}">${zs.completed ? '✓ DONE' : fmtTime(zs.remaining)}</div>
-              <div class="ring-label">${zs.completed ? 'ZONE COMPLETE' : (zs.blockType === 'focus' ? 'FOCUS' : 'BREAK') + ' · ' + cycleTitle(z, zs.cycle)}</div>
+              <div class="ring-time mono" style="color:${color}">${ringTime}</div>
+              <div class="ring-label">${ringLabel}</div>
             </div>
           </div>
         </div>
@@ -1189,6 +1333,13 @@ const ZoneApp = (() => {
       c.innerHTML = `
         <button class="ctl" onclick="ZoneApp.resetZone(${state.currentZoneIdx})"><span class="ctl-icon">↺</span> RESET</button>
         ${nextIdx < getZones().length ? `<button class="ctl" onclick="ZoneApp.selectZone(${nextIdx})"><span class="ctl-icon">⏩</span> SKIP</button>` : ''}`;
+      return;
+    }
+    if (zs?.blockComplete) {
+      c.innerHTML = `
+        <button class="ctl primary big" onclick="ZoneApp.takeBreak()"><span class="ctl-icon">⏸</span> TAKE BREAK</button>
+        <button class="ctl" onclick="ZoneApp.timerToggle()"><span class="ctl-icon">⏸</span> PAUSE/RESUME</button>
+        <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx})"><span class="ctl-icon">✓</span> DONE</button>`;
       return;
     }
     c.innerHTML = `
@@ -1214,8 +1365,10 @@ const ZoneApp = (() => {
     if (!z || !zs) return;
     if (zs.cycle === cycle && zs.blockType === 'focus') return;
     if (!confirm(`Jump to ${cycleTitle(z, cycle)}? Current progress will be lost.`)) return;
-    zs.cycle = cycle;
+    zs.cycle = Math.min(cycle, (z.totalCycles || 4) - 1);
     zs.blockType = 'focus';
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
     zs.remaining = (z.focusDuration || 25) * 60;
     zs.total = (z.focusDuration || 25) * 60;
     zs.elapsed = 0;
@@ -1270,16 +1423,16 @@ const ZoneApp = (() => {
         const d = e.duration || dur;
         state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - d);
         if (state.stats.history[today]) {
-          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 1) - 1);
-          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || d) - d);
+          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 0) - 1);
+          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || 0) - d);
         }
       }
       if (e.type === 'zone_complete') {
         state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
         state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - dur);
         if (state.stats.history[today]) {
-          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 1) - 1);
-          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || dur) - dur);
+          state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 0) - 1);
+          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || 0) - dur);
         }
       }
       if (e.type === 'skip_block' && e.blockType === 'focus') {
@@ -1303,6 +1456,8 @@ const ZoneApp = (() => {
     // Reset timer state
     zs.running = false;
     zs.completed = false;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
     zs.cycle = 0;
     zs.blockType = 'focus';
     zs.remaining = dur * 60;
@@ -1434,15 +1589,15 @@ const ZoneApp = (() => {
     const firstDay = new Date(year, month, 1).getDay();
     const mName = new Date(year, month).toLocaleString('default', { month: 'long', year: 'numeric' });
     const labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const totalEvents = getMergedEvents().length;
+    const allMergedEvents = getMergedEvents();
+    const totalEvents = allMergedEvents.length;
 
     let cells = labels.map(d => `<div class="cal-day-label">${d}</div>`).join('');
     for (let i = 0; i < firstDay; i++) cells += '<div></div>';
     for (let d = 1; d <= daysInMonth; d++) {
       const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
       const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const allEvents = getMergedEvents();
-      const dayEvents = allEvents.filter(e => e.date === dateStr);
+      const dayEvents = allMergedEvents.filter(e => e.date === dateStr);
       const nEvents = dayEvents.length;
       cells += `<div class="cal-cell ${isToday ? 'today' : ''}" onclick="ZoneApp.showDayMenu('${dateStr}')" title="${nEvents} event${nEvents !== 1 ? 's' : ''}">
         <span class="cal-num">${d}</span>
@@ -1451,7 +1606,7 @@ const ZoneApp = (() => {
       </div>`;
     }
 
-    const todayEvents = getMergedEvents().filter(e => e.date === todayKey());
+    const todayEvents = allMergedEvents.filter(e => e.date === todayKey());
 
     body.innerHTML = `
       <div class="cal-wrap" style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">
@@ -1487,7 +1642,7 @@ const ZoneApp = (() => {
               ? '<div class="cal-empty">Tap a date on the calendar to add or view events</div>'
               : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${e.id}')`}">
                   <div class="cal-event-bar" style="background:${e.color}"></div>
-                  <span class="cal-event-time">${e.start || '──'}${e.end ? '–' + esc(e.end) : ''}</span>
+                  <span class="cal-event-time">${esc(e.start || '──')}${e.end ? '–' + esc(e.end) : ''}</span>
                   <span class="cal-event-title">${esc(e.title)}${e.notes ? ` <span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">(${esc(e.notes)})</span>` : ''}</span>
                   <span class="cal-event-type">${e.type}</span>
                   ${e.default ? '<span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">DEFAULT</span>'
@@ -2159,7 +2314,8 @@ const ZoneApp = (() => {
   // ─── EXAM TIMER TAB ─────────────────────────
   function getExamDates() {
     const trackId = state.tracks?.find(t => t.name === state.examTrack)?.id;
-    const defaults = EXAM_DATES_BY_TRACK[trackId] || EXAM_DATES_BY_TRACK.CUSTOM;
+    const defaultsObj = EXAM_DATES_BY_TRACK();
+    const defaults = defaultsObj[trackId] || defaultsObj.CUSTOM;
     const userDates = state.examDates || [];
     return defaults.map(d => {
       const user = userDates.find(u => u.id === d.id);
@@ -2178,7 +2334,7 @@ const ZoneApp = (() => {
       const start = new Date(yr + '-01-01').getTime();
       const total = target - start;
       const frac = diff > 0 ? Math.min(1, diff / total) : 0;
-      const r = 80, c = 2 * Math.PI * r, size = 220, cx = 110, cy = 110;
+      const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
         <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--bg-3)" stroke-width="12"/>
@@ -2269,7 +2425,7 @@ const ZoneApp = (() => {
         const start = new Date(yr + '-01-01').getTime();
         const total = target - start;
         const frac = diff > 0 ? Math.min(1, diff / total) : 0;
-        const c = 2 * Math.PI * 90;
+        const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
     });
@@ -2364,6 +2520,33 @@ const ZoneApp = (() => {
                 <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
               </div>
             </div>`).join('')}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0">
+              <div><div style="font-weight:500;font-size:13px">Sound Pack</div><div style="font-size:11px;color:var(--text-muted)">Tone profile for timer events</div></div>
+              <select onchange="ZoneApp.setSetting('soundPack', this.value)" style="background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--text-primary);font-size:12px;font-family:var(--mono)">
+                ${Object.entries(SOUND_PACKS).map(([k, v]) => `<option value="${k}" ${state.settings.soundPack === k ? 'selected' : ''}>${v.label || k.charAt(0).toUpperCase() + k.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Timer Behavior</div>
+            ${[
+              { id: 'autoStartBreaks', label: 'Auto-Start Breaks', desc: 'Focus ends → break starts automatically', val: state.settings.autoStartBreaks },
+              { id: 'flowMode', label: 'Flow Mode', desc: 'Auto-continue through all cycles without intervention', val: state.settings.flowMode }
+            ].map(s => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
+              <div><div style="font-weight:500;font-size:13px">${s.label}</div><div style="font-size:11px;color:var(--text-muted)">${s.desc}</div></div>
+              <div style="width:44px;height:24px;border-radius:12px;background:${s.val ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('${s.id}')">
+                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+              </div>
+            </div>`).join('')}
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Timer Preset</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+              ${Object.entries(TIMER_PRESETS).filter(([k]) => k !== 'custom').map(([k, p]) => `<button onclick="ZoneApp.setSetting('timerPreset', '${k}')" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
+                <span style="font-size:13px;font-weight:600">${p.label}</span>
+                <span style="font-size:10px;color:var(--text-muted)">${p.focus}m focus · ${p.break}m break</span>
+              </button>`).join('')}
+            </div>
           </div>
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Theme</div>
@@ -3044,11 +3227,12 @@ const ZoneApp = (() => {
 
   async function resetAll() {
     if (!confirm('Reset all data? This cannot be undone.')) return;
+    state._clearingData = true;
     state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
     state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
     state.events = [];
     state.config = { identity: {}, zones: [] };
-    state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker' };
+    state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker', autoStartBreaks: true, flowMode: false, timerPreset: 'custom', soundPack: 'default' };
     state.examTrack = null;
     state.onboarded = false;
     state.byZone = {};
@@ -3087,6 +3271,7 @@ const ZoneApp = (() => {
   }
 
   function logout() {
+    state._clearingData = true;
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
       ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
@@ -3327,10 +3512,10 @@ const ZoneApp = (() => {
     if (savedEvents) state.events = savedEvents;
 
     const savedStats = storage().get('stats');
-    if (savedStats) Object.assign(state.stats, savedStats);
+    if (savedStats) { if (typeof savedStats.totalSessions !== 'number') savedStats.totalSessions = 0; if (typeof savedStats.totalFocusMin !== 'number') savedStats.totalFocusMin = 0; Object.assign(state.stats, savedStats); }
 
     const savedTracking = storage().get('tracking');
-    if (savedTracking) Object.assign(state.tracking, savedTracking);
+    if (savedTracking) { if (!Array.isArray(savedTracking.log)) savedTracking.log = []; Object.assign(state.tracking, savedTracking); }
 
     const savedExam = storage().get('examTrack');
     if (savedExam) state.examTrack = savedExam;
@@ -3429,7 +3614,7 @@ const ZoneApp = (() => {
 
     render();
     window.addEventListener('beforeunload', e => {
-      saveState();
+      if (!state._clearingData) saveState();
       const zs = getCurrentZs();
       if (zs && zs.running) {
         e.preventDefault();
@@ -3438,8 +3623,8 @@ const ZoneApp = (() => {
     });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
-        const ov = document.querySelector('.modal-overlay');
-        if (ov) ov.remove();
+        const modals = document.querySelectorAll('.modal-overlay');
+        if (modals.length) modals[modals.length - 1].remove();
         return;
       }
       if (e.key === ' ' && state.tab === 'console') {
@@ -3473,7 +3658,8 @@ const ZoneApp = (() => {
     toggleSidebar, toggleFullscreen,
     refreshCharts, scrollToChart, showDayDetail,
     openExamDateEditor, saveExamDates,
-    applyTheme, setTheme
+    applyTheme, setTheme,
+    takeBreak, setSetting, applyPreset
   };
 })();
 

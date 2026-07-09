@@ -47,13 +47,13 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 <body>
 <div class="login-wrap">
 <div class="login-box">
-<span class="logo">🎯</span>
+<span class="logo" aria-hidden="true">🎯</span>
 <h1>ZONE OS</h1>
 <p class="sub">Study Execution System</p>
 
 <div class="tab-row">
-<button class="tab-btn active" id="tabLogin" onclick="showPanel('login')">LOGIN</button>
-<button class="tab-btn" id="tabSignup" onclick="showPanel('signup')">SIGN UP</button>
+<button class="tab-btn active" id="tabLogin">LOGIN</button>
+<button class="tab-btn" id="tabSignup">SIGN UP</button>
 </div>
 
 <div id="panelLogin" class="panel">
@@ -179,7 +179,9 @@ document.getElementById('resetBtn').onclick=function(){
   .catch(e=>{err.textContent=e.message||'Reset failed';btn.style.display='';loader.style.display='none'})
 };
 
-// Enter key
+// ENTER KEY & TABS
+document.getElementById('tabLogin').addEventListener('click',()=>showPanel('login'));
+document.getElementById('tabSignup').addEventListener('click',()=>showPanel('signup'));
 document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()});
 document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()});
 document.getElementById('signupUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('signupBtn').click()});

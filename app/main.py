@@ -31,7 +31,7 @@ if _env.exists():
         from dotenv import load_dotenv
         load_dotenv(_env)
         log.info("loaded .env from %s", _env)
-    except Exception:
+    except ImportError:
         pass
 STATIC_DIR = Path(__file__).parent / "static"
 DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
@@ -156,6 +156,7 @@ def check_password(pw: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(pw.encode(), hashed.encode())
     except Exception:
+        log.warning("password check failed", exc_info=True)
         return False
 
 def is_guest(token: str) -> bool:
@@ -372,7 +373,7 @@ async def signup(body: SignupBody, request: Request):
 async def login(body: LoginBody, request: Request):
     check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
-    if ZONE_PASSWORD and uname == ZONE_USERNAME and body.password == ZONE_PASSWORD:
+    if ZONE_PASSWORD and uname == ZONE_USERNAME and secrets.compare_digest(body.password, ZONE_PASSWORD):
         ensure_user_dir(uname)
         token = make_session(uname)
         resp = JSONResponse({"token": token, "username": uname})
@@ -538,7 +539,7 @@ async def health():
 async def keepalive(request: Request):
     token = request.query_params.get("token", "")
     ct = os.environ.get("CRON_TOKEN", "")
-    if ct and token != ct:
+    if ct and not secrets.compare_digest(token, ct):
         raise HTTPException(403, "invalid token")
     return {"status": "alive", "timestamp": time.time()}
 
