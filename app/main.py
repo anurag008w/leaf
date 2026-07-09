@@ -5,6 +5,8 @@ import secrets
 import time
 import logging
 import re
+import tempfile
+import shutil
 from typing import Any
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -38,7 +40,10 @@ DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent
 ZONE_USERNAME = os.environ.get("ZONE_USERNAME", "").strip() or "admin"
 ZONE_PASSWORD = os.environ.get("ZONE_PASSWORD", "").strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
-SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
+try:
+    SYNC_INTERVAL = max(60, int(os.environ.get("SYNC_INTERVAL", "1800") or "1800"))
+except (ValueError, TypeError):
+    SYNC_INTERVAL = 1800
 SYNC_RESTORE = os.environ.get("SYNC_RESTORE", "true").strip().lower() in ("1", "true", "yes")
 HUB_ENABLED = os.environ.get("HUB_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 HUB_URL = os.environ.get("HUB_URL", "").strip()
@@ -90,7 +95,7 @@ def invalidate_user_sessions(username: str) -> None:
 
 def expire_stale_tokens() -> None:
     now = time.time()
-    stale = [t for t in _active_tokens if not is_guest(t) and _token_users.get(t) and _token_created.get(t, 0) < now - TOKEN_EXPIRY_SECONDS]
+    stale = [t for t in list(_active_tokens) if _token_created.get(t, 0) < now - TOKEN_EXPIRY_SECONDS]
     for t in stale:
         _active_tokens.discard(t)
         _token_users.pop(t, None)
@@ -110,6 +115,8 @@ def load_sessions() -> None:
             _token_created[token] = created
         for token in saved.get("guest_tokens", []):
             _active_tokens.add(token)
+            if token not in _token_created:
+                _token_created[token] = time.time()
         expire_stale_tokens()
         log.info("restored %d sessions", len(_active_tokens))
     except Exception as e:
@@ -119,11 +126,13 @@ def save_sessions() -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         guest_tokens = [t for t in _active_tokens if is_guest(t)]
-        SESSIONS_FILE.write_text(json.dumps({
+        tmp = SESSIONS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({
             "token_users": _token_users,
             "token_created": _token_created,
             "guest_tokens": guest_tokens,
-        }, indent=2))
+        }))
+        tmp.replace(SESSIONS_FILE)
     except Exception as e:
         log.warning("failed to save sessions: %s", e)
 
@@ -139,15 +148,34 @@ def load_config():
     return config_cache["data"]
 
 # ── User management ────────────────────────────────
+_users_corrupted = False
+
 def load_users() -> dict:
+    global _users_corrupted
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if USERS_FILE.exists():
-        return json.loads(USERS_FILE.read_text())
+        try:
+            raw = USERS_FILE.read_text()
+            if not raw.strip():
+                return {}
+            data = json.loads(raw)
+            _users_corrupted = False
+            return data
+        except (json.JSONDecodeError, OSError):
+            log.warning("corrupted users file")
+            _users_corrupted = True
+            return {}
     return {}
 
 def save_users(users: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2))
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = USERS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(users, indent=2))
+        tmp.replace(USERS_FILE)
+    except OSError as e:
+        log.warning("failed to save users: %s", e)
+        raise
 
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -179,7 +207,9 @@ def _read_json(p: Path) -> Any:
 
 def _write_json(p: Path, data) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(p)
 
 def resolve_username(token: str) -> str | None:
     if is_guest(token):
@@ -227,7 +257,14 @@ def load_reset_keys() -> list:
     return []
 
 def save_reset_keys(keys: list) -> None:
-    RESET_KEYS_FILE.write_text(json.dumps(keys, indent=2))
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = RESET_KEYS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(keys, indent=2))
+        tmp.replace(RESET_KEYS_FILE)
+    except OSError as e:
+        log.warning("failed to save reset keys: %s", e)
+        raise
 
 def make_secure_cookie(resp, token: str) -> None:
     resp.set_cookie(
@@ -306,8 +343,8 @@ async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["X-XSS-Protection"] = "1; mode=block"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://hf.space; frame-src 'none'; object-src 'none'"
     return resp
 
 # ── Auth middleware ───────────────────────────────
@@ -353,11 +390,13 @@ async def signup(body: SignupBody, request: Request):
         raise HTTPException(400, "username too short")
     if not re.match(r"^[a-zA-Z0-9_-]+$", uname):
         raise HTTPException(400, "username can only contain letters, numbers, hyphens and underscores")
-    if not body.password or len(body.password) < 3:
-        raise HTTPException(400, "password too short")
+    if not body.password or len(body.password) < 8:
+        raise HTTPException(400, "password too short (minimum 8 characters)")
     if uname == ZONE_USERNAME:
         raise HTTPException(409, "username taken")
     users = load_users()
+    if _users_corrupted:
+        raise HTTPException(500, "user database corrupted — contact admin")
     if uname in users:
         raise HTTPException(409, "username taken")
     ensure_user_dir(uname)
@@ -381,6 +420,8 @@ async def login(body: LoginBody, request: Request):
         log.info("admin login: %s", uname)
         return resp
     users = load_users()
+    if _users_corrupted:
+        raise HTTPException(500, "user database corrupted — contact admin")
     if uname in users and check_password(body.password, users[uname]):
         ensure_user_dir(uname)
         token = make_session(uname)
@@ -417,21 +458,23 @@ async def reset_password(body: ResetPasswordBody, request: Request):
     if not ZONE_PASSWORD:
         raise HTTPException(400, "no auth configured")
     keys = load_reset_keys()
-    key_used = body.admin_password in keys
-    valid = body.admin_password == ZONE_PASSWORD or key_used
+    key_used = any(secrets.compare_digest(body.admin_password, k) for k in keys)
+    valid = secrets.compare_digest(body.admin_password, ZONE_PASSWORD) or key_used
     if not valid:
         raise HTTPException(403, "invalid admin password")
-    if key_used:
-        keys.remove(body.admin_password)
-        save_reset_keys(keys)
     uname = body.username.strip()
+    if not re.match(r'^[a-zA-Z0-9_.-]{1,64}$', uname):
+        raise HTTPException(400, "invalid username format")
     users = load_users()
     if uname not in users:
         raise HTTPException(404, "user not found")
-    if not body.new_password or len(body.new_password) < 3:
-        raise HTTPException(400, "new password too short")
+    if not body.new_password or len(body.new_password) < 8:
+        raise HTTPException(400, "new password too short (minimum 8 characters)")
     users[uname] = hash_password(body.new_password)
     save_users(users)
+    if key_used:
+        keys = [k for k in keys if not secrets.compare_digest(body.admin_password, k)]
+        save_reset_keys(keys)
     invalidate_user_sessions(uname)
     log.info("password reset for: %s", uname)
     return {"status": "ok", "message": "password reset for " + uname}
@@ -465,12 +508,14 @@ async def change_password(body: ChangePasswordBody, request: Request):
     if not uname:
         raise HTTPException(401, "not authenticated")
     users = load_users()
+    if _users_corrupted:
+        raise HTTPException(500, "user database corrupted — contact admin")
     if uname not in users:
         raise HTTPException(404, "user not found")
     if not check_password(body.current_password, users[uname]):
         raise HTTPException(403, "current password is incorrect")
-    if not body.new_password or len(body.new_password) < 3:
-        raise HTTPException(400, "new password too short")
+    if not body.new_password or len(body.new_password) < 8:
+        raise HTTPException(400, "new password too short (minimum 8 characters)")
     users[uname] = hash_password(body.new_password)
     save_users(users)
     invalidate_user_sessions(uname)
@@ -498,6 +543,8 @@ async def change_username(body: ChangeUsernameBody, request: Request):
     if uname == ZONE_USERNAME:
         raise HTTPException(400, "admin username cannot be changed")
     users = load_users()
+    if _users_corrupted:
+        raise HTTPException(500, "user database corrupted — contact admin")
     if new_name in users:
         raise HTTPException(409, "username taken")
     if new_name == ZONE_USERNAME:

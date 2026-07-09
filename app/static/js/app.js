@@ -213,6 +213,9 @@ const ZoneApp = (() => {
   }
 
   function saveState() {
+    const now = Date.now();
+    if (now - (state._lastStateSave || 0) < 2000) return;
+    state._lastStateSave = now;
     const session = {
       currentZoneIdx: state.currentZoneIdx,
       byZone: state.byZone,
@@ -228,7 +231,6 @@ const ZoneApp = (() => {
     storage().set('examTrack', state.examTrack);
     storage().set('examDates', state.examDates);
     if (isGuest()) return;
-    const now = Date.now();
     if (now - _lastHttpSave < 5000) {
       if (!_pendingHttpSave) _pendingHttpSave = setTimeout(_flushHttpSave, 5000 - (now - _lastHttpSave));
       return;
@@ -270,8 +272,9 @@ const ZoneApp = (() => {
     const pack = SOUND_PACKS[state.settings.soundPack] || SOUND_PACKS.default;
     const seq = pack[kind];
     if (!seq || seq.length === 0) return;
-    for (let i = 0; i < seq.length; i += 4) {
-      beep(seq[i], seq[i+1], seq[i+2], seq[i+3] ?? 0.05);
+    const stride = seq.length % 4 === 0 ? 4 : 3;
+    for (let i = 0; i < seq.length; i += stride) {
+      beep(seq[i], seq[i+1], seq[i+2], stride === 4 ? seq[i+3] : undefined);
     }
   }
 
@@ -383,7 +386,7 @@ const ZoneApp = (() => {
   function logEvent(type, data = {}) {
     const entry = { id: uid(), date: todayKey(), time: new Date().toISOString(), type, ...data };
     state.tracking.log.push(entry);
-    if (state.tracking.log.length > 5000) state.tracking.log = state.tracking.log.slice(-3000);
+    if (state.tracking.log.length > 5000) state.tracking.log.splice(0, state.tracking.log.length - 3000);
 
     const z = getZone(state.currentZoneIdx);
     const zi = state.currentZoneIdx;
@@ -2716,6 +2719,14 @@ const ZoneApp = (() => {
         _themeFxRaf = requestAnimationFrame(frame);
       }
       _themeFxRaf = requestAnimationFrame(frame);
+      document.addEventListener('visibilitychange', function onVis() {
+        if (document.hidden && _themeFxRaf) {
+          cancelAnimationFrame(_themeFxRaf);
+          _themeFxRaf = null;
+        } else if (!document.hidden && !_themeFxRaf) {
+          _themeFxRaf = requestAnimationFrame(frame);
+        }
+      });
     } else {
       if (_themeFxCanvas) _themeFxCanvas.style.display = 'none';
       if (_themeFxParticles.length) _themeFxParticles = [];
