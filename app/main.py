@@ -386,12 +386,10 @@ async def auth_middleware(request: Request, call_next):
 async def signup(body: SignupBody, request: Request):
     check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
-    if not uname or len(uname) < 2:
-        raise HTTPException(400, "username too short")
-    if not re.match(r"^[a-zA-Z0-9_-]+$", uname):
-        raise HTTPException(400, "username can only contain letters, numbers, hyphens and underscores")
+    if not uname or len(uname) < 2 or not re.match(r"^[a-zA-Z0-9_-]+$", uname):
+        raise HTTPException(400, "invalid signup data")
     if not body.password or len(body.password) < 8:
-        raise HTTPException(400, "password too short (minimum 8 characters)")
+        raise HTTPException(400, "invalid signup data")
     if uname == ZONE_USERNAME:
         raise HTTPException(409, "username taken")
     users = load_users()
@@ -628,7 +626,10 @@ async def save_user_data(body: UserDataBody, request: Request):
     if not uname:
         return {"status": "ok", "guest": True}
     if body.key not in USER_DATA_KEYS:
-        raise HTTPException(400, f"invalid key '{body.key}', must be one of {sorted(USER_DATA_KEYS)}")
+        raise HTTPException(400, f"invalid key '{body.key}'")
+    raw = json.dumps(body.value)
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(413, "data too large (max 5 MB)")
     write_user_data(uname, body.key, body.value)
     return {"status": "ok"}
 

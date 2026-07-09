@@ -144,7 +144,8 @@ def create_snapshot(source: Path) -> Path:
 
 
 def upload(repo_id: str, snapshot_dir: Path):
-    log.info("uploading %d files to %s …", len(list(snapshot_dir.rglob("*"))), repo_id)
+    file_count = sum(1 for _ in snapshot_dir.rglob("*"))
+    log.info("uploading %d files to %s …", file_count, repo_id)
     upload_folder(
         folder_path=str(snapshot_dir),
         repo_id=repo_id,
@@ -191,8 +192,9 @@ def sync_once(last_fp: str | None = None, last_mm: WorkspaceMarker | None = None
     if last_fp is not None and current_fp == last_fp and not _prune_needed:
         return (last_fp, current_mm)
     log.info("uploading to %s …", repo_id)
-    snap = create_snapshot(DATA_DIR)
+    snap = None
     try:
+        snap = create_snapshot(DATA_DIR)
         upload(repo_id, snap)
         try:
             prune_remote(repo_id, snap)
@@ -204,7 +206,8 @@ def sync_once(last_fp: str | None = None, last_mm: WorkspaceMarker | None = None
         log.error("sync upload FAILED: %s", exc)
         raise
     finally:
-        shutil.rmtree(snap, ignore_errors=True)
+        if snap:
+            shutil.rmtree(snap, ignore_errors=True)
     return (current_fp, current_mm)
 
 
