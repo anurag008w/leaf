@@ -300,6 +300,7 @@ const ZoneApp = (() => {
         zs.remaining = p.focus * 60;
         zs.total = p.focus * 60;
         zs.elapsed = 0;
+        zs.zoneElapsed = 0;
         zs.cycle = 0;
         zs.blockType = 'focus';
         zs.completed = false;
@@ -648,6 +649,8 @@ const ZoneApp = (() => {
     zs.running = false;
     zs.blockComplete = false;
     zs.overtimeSeconds = 0;
+    zs.elapsed = 0;
+    zs.zoneElapsed = 0;
     const dur = zs.blockType === 'focus' ? (z.focusDuration || 25) * 60 : (getBreakDur(z, zs.cycle) * 60);
     zs.remaining = dur;
     zs.total = dur;
@@ -661,6 +664,19 @@ const ZoneApp = (() => {
     if (!z || !zs) return;
     stopTimer();
     zs.running = false;
+
+    // Log overtime before discarding if skipping during overtime
+    if (zs.blockComplete && zs.overtimeSeconds > 0) {
+      logEvent('overtime', { zoneIdx: state.currentZoneIdx, seconds: zs.overtimeSeconds, cycle: zs.cycle });
+      const extraMin = Math.round(zs.overtimeSeconds / 60);
+      if (extraMin > 0) {
+        state.stats.totalFocusMin += extraMin;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += extraMin;
+      }
+    }
+
     if (zs.blockType === 'focus' && !zs.blockComplete) {
       const partial = Math.round(((z.focusDuration || 25) * 60 - zs.remaining) / 60);
       if (partial >= 1) {
@@ -805,6 +821,19 @@ const ZoneApp = (() => {
   function markZoneComplete(idx) {
     const z = getZone(idx);
     const zs = state.byZone[idx];
+
+    // If completing during overtime, record overtime first
+    if (zs && zs.blockComplete && zs.overtimeSeconds > 0) {
+      logEvent('overtime', { zoneIdx: idx, seconds: zs.overtimeSeconds, zoneName: z?.title });
+      const extraMin = Math.round(zs.overtimeSeconds / 60);
+      if (extraMin > 0) {
+        state.stats.totalFocusMin += extraMin;
+        const key = todayKey();
+        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+        state.stats.history[key].focusMin += extraMin;
+      }
+    }
+
     const evData = { zoneIdx: idx, zoneName: z?.title };
     state.tracking.log.push({ id: uid(), date: todayKey(), time: new Date().toISOString(), type: 'zone_complete', ...evData });
     if (!state.tracking.zoneStats[idx]) state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
@@ -1372,6 +1401,7 @@ const ZoneApp = (() => {
     zs.remaining = (z.focusDuration || 25) * 60;
     zs.total = (z.focusDuration || 25) * 60;
     zs.elapsed = 0;
+    zs.zoneElapsed = 0;
     if (!zs.running) stopTimer();
     renderAll();
   }
@@ -1442,6 +1472,13 @@ const ZoneApp = (() => {
           if (state.stats.history[today]) {
             state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || partial) - partial);
           }
+        }
+      }
+      if (e.type === 'overtime') {
+        const rollMin = Math.max(1, Math.round((e.seconds || 0) / 60));
+        state.stats.totalFocusMin = Math.max(0, state.stats.totalFocusMin - rollMin);
+        if (state.stats.history[today]) {
+          state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || rollMin) - rollMin);
         }
       }
     });
@@ -3599,7 +3636,11 @@ const ZoneApp = (() => {
               zs.remaining = Math.max(0, zs.remaining - elapsedSec);
             }
             zs.lastTick = Date.now();
-            if (zs.remaining <= 0) {
+            if (zs.remaining <= 0 && zs.blockComplete) {
+              // Resume overtime counting — block was already completed before reload
+              zs.running = true;
+              state.timerHandle = setInterval(timerTick, 1000);
+            } else if (zs.remaining <= 0) {
               zs.running = false;
               handleBlockComplete();
             } else {
