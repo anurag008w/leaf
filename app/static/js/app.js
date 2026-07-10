@@ -15,7 +15,7 @@ const ZoneApp = (() => {
     sidebarOpen: true, fullscreen: false,
     events: [],
     stats: { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} },
-    tracking: { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} },
+    tracking: { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {}, archivedDaily: {} },
     settings: { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker', autoStartBreaks: true, flowMode: false, timerPreset: 'custom', soundPack: 'default' },
     examTrack: null,
     examDates: [],
@@ -51,7 +51,21 @@ const ZoneApp = (() => {
     return `${h12}:${String(m).padStart(2,'0')} ${suf}`;
   }
 
-  function todayKey() { return new Date().toISOString().slice(0,10); }
+  // BUG FIX: previously used new Date().toISOString().slice(0,10), which returns
+  // the UTC date. For any user ahead of UTC (e.g. IST, UTC+5:30) the "day" then
+  // rolled over at 5:30 AM local time instead of local midnight — while the
+  // calendar tab's "today" highlight used local date parts. Late-night sessions
+  // (12 AM - 5:30 AM local) got logged under the previous day's key in pomodoro
+  // /stats but showed as "today" on the calendar, causing the two to disagree.
+  // localDateKey() now builds the key from local date components everywhere.
+  function localDateKey(d) {
+    d = d || new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function todayKey() { return localDateKey(); }
 
   let defaultEventsCache = null;
   let defaultEventsYear = null;
@@ -383,10 +397,50 @@ const ZoneApp = (() => {
   // ─── Tracking Engine ──────────────────────────
   function getTodayLog() { return state.tracking.log.filter(e => e.date === todayKey()); }
 
+  // BUG FIX: log.splice() used to just delete the oldest raw events once the
+  // log passed 5000 entries, with no record kept anywhere else. But
+  // getTrackingStats() computes ALL-TIME totals (All Sessions, Total Focus,
+  // History table, monthly groups, streak) by re-scanning this same `log`
+  // array — so every trim silently shrank those "permanent" numbers, which
+  // looked exactly like an unwanted reset. Now we fold the events being
+  // dropped into `archivedDaily` (a permanent per-day summary) first, and
+  // getTrackingStats() merges that back in, so old totals are never lost.
+  function archiveOldEvents(events) {
+    if (!state.tracking.archivedDaily) state.tracking.archivedDaily = {};
+    const store = state.tracking.archivedDaily;
+    const hadTimerByZoneDate = new Set(
+      events.filter(e => e.type === 'session_complete').map(e => e.date + '|' + e.zoneIdx)
+    );
+    events.forEach(e => {
+      if (!store[e.date]) store[e.date] = { focusMin: 0, sessions: 0, manualDone: 0, skips: 0 };
+      const day = store[e.date];
+      if (e.type === 'session_complete') {
+        day.focusMin += (e.duration || 0);
+        day.sessions++;
+      } else if (e.type === 'zone_complete') {
+        if (!hadTimerByZoneDate.has(e.date + '|' + e.zoneIdx)) {
+          day.focusMin += (getZone(e.zoneIdx)?.focusDuration || 25);
+          day.manualDone++;
+        }
+      } else if (e.type === 'skip_block' || e.type === 'skip_zone') {
+        day.skips++;
+      } else if (e.type === 'overtime') {
+        day.focusMin += Math.round((e.seconds || 0) / 60);
+      }
+    });
+  }
+
   function logEvent(type, data = {}) {
     const entry = { id: uid(), date: todayKey(), time: new Date().toISOString(), type, ...data };
     state.tracking.log.push(entry);
-    if (state.tracking.log.length > 5000) state.tracking.log.splice(0, state.tracking.log.length - 3000);
+    if (state.tracking.log.length > 5000) {
+      let removeCount = state.tracking.log.length - 3000;
+      // Don't split one day's events across the archive boundary, or that
+      // day's totals could double count (partly live, partly archived).
+      const cutDate = state.tracking.log[removeCount - 1]?.date;
+      while (removeCount < state.tracking.log.length && state.tracking.log[removeCount].date === cutDate) removeCount++;
+      archiveOldEvents(state.tracking.log.splice(0, removeCount));
+    }
 
     const z = getZone(state.currentZoneIdx);
     const zi = state.currentZoneIdx;
@@ -423,7 +477,9 @@ const ZoneApp = (() => {
         .reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0)
       + todayEvents.filter(e => e.type === 'overtime')
         .reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
-    const totalSessions = log.filter(e => e.type === 'session_complete').length;
+    const archivedDaily = state.tracking.archivedDaily || {};
+    const totalSessions = log.filter(e => e.type === 'session_complete').length
+      + Object.values(archivedDaily).reduce((s, d) => s + (d.sessions || 0), 0);
 
     const dailyMap = {};
     log.forEach(e => {
@@ -451,6 +507,17 @@ const ZoneApp = (() => {
         dailyMap[date].focusMin += Math.round((e.seconds || 0) / 60);
       }
       dailyMap[date].events.push(e);
+    });
+    // Days whose raw events were already trimmed from `log` still need to
+    // count toward all-time totals and the History table — pull them back
+    // in from the permanent per-day archive. These dates are always older
+    // than anything left in `log` (archiveOldEvents never splits a day
+    // across the boundary), so there's no overlap/double-count risk.
+    Object.keys(archivedDaily).forEach(date => {
+      if (!dailyMap[date]) {
+        const a = archivedDaily[date];
+        dailyMap[date] = { focusMin: a.focusMin, timerMin: a.focusMin, sessions: a.sessions, manualDone: a.manualDone, skips: a.skips, events: [], archived: true };
+      }
     });
     const totalManual = Object.values(dailyMap).reduce((s, d) => s + (d.manualDone || 0), 0);
     const totalFocusMin = Object.values(dailyMap).reduce((s, d) => s + (d.focusMin || 0), 0);
@@ -495,7 +562,7 @@ const ZoneApp = (() => {
     sortedEntries.forEach(([date, data]) => {
       const m = date.slice(0, 7);
       if (!monthGroups.length || monthGroups[monthGroups.length - 1].month !== m) {
-        monthGroups.push({ month: m, label: new Date(m + '-01').toLocaleDateString('en', { year: 'numeric', month: 'long' }), days: [], totalFocus: 0, totalSessions: 0, totalManual: 0, totalSkips: 0 });
+        monthGroups.push({ month: m, label: new Date(m + '-01T00:00:00').toLocaleDateString('en', { year: 'numeric', month: 'long' }), days: [], totalFocus: 0, totalSessions: 0, totalManual: 0, totalSkips: 0 });
       }
       const g = monthGroups[monthGroups.length - 1];
       g.days.push({ date, ...data });
@@ -515,7 +582,12 @@ const ZoneApp = (() => {
 
   function getBreakDur(zone, cycle) {
     if (!zone) return 5;
-    return (cycle > 0 && (cycle + 1) % (zone.cyclesBeforeLongBreak || 4) === 0)
+    // BUG FIX: the `cycle > 0` guard used to force cycle 0's break to always be
+    // short, even when cyclesBeforeLongBreak is 1 (i.e. "long break every
+    // cycle"). calcZoneTotal() (used for the editor's "Calculated total"
+    // preview) never had that guard, so with cyclesBeforeLongBreak=1 the
+    // editor promised a longer zone than the live timer actually ran.
+    return ((cycle + 1) % (zone.cyclesBeforeLongBreak || 4) === 0)
       ? zone.longBreakDuration : zone.breakDuration;
   }
 
@@ -1409,32 +1481,6 @@ const ZoneApp = (() => {
     renderAll();
   }
 
-  function rebuildZoneStatsFromLog(idx) {
-    // Rebuilds zoneStats[idx] purely from state.tracking.log, using the same
-    // accumulation rules as logEvent(). Used after removing some of a zone's
-    // log entries (e.g. resetZone) so remaining history stays accurate.
-    const stats = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
-    const zoneLog = state.tracking.log.filter(e => e.zoneIdx === idx);
-    // A zone_complete event came from the normal timer flow (completeZone)
-    // if that zone had a session_complete that same day; otherwise it came
-    // from markZoneComplete (manual, no timer) — same test getTrackingStats() uses.
-    const datesWithSession = new Set(zoneLog.filter(e => e.type === 'session_complete').map(e => e.date));
-    zoneLog.forEach(e => {
-      if (e.type === 'session_complete') {
-        stats.sessions++;
-        stats.totalMin += (e.duration || getZone(idx)?.focusDuration || 25);
-      } else if (e.type === 'skip_block' || e.type === 'skip_zone') {
-        stats.skips++;
-      } else if (e.type === 'pause') {
-        stats.pauses++;
-      } else if (e.type === 'zone_complete') {
-        if (datesWithSession.has(e.date)) stats.completes++;
-        else stats.doneNoTimer++;
-      }
-    });
-    state.tracking.zoneStats[idx] = stats;
-  }
-
   function resetZone(idx) {
     const z = getZone(idx);
     const zs = state.byZone[idx];
@@ -1447,6 +1493,8 @@ const ZoneApp = (() => {
     const today = todayKey();
     const dur = z.focusDuration || 25;
     const zoneEvents = state.tracking.log.filter(e => e.zoneIdx === idx && e.date === today);
+    const hadTimerToday = zoneEvents.some(e => e.type === 'session_complete');
+    const zst = state.tracking.zoneStats[idx];
     zoneEvents.forEach(e => {
       if (e.type === 'session_start') {
         state.tracking.sessionCount = Math.max(0, state.tracking.sessionCount - 1);
@@ -1459,6 +1507,10 @@ const ZoneApp = (() => {
           state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 0) - 1);
           state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || 0) - d);
         }
+        if (zst) {
+          zst.sessions = Math.max(0, zst.sessions - 1);
+          zst.totalMin = Math.max(0, zst.totalMin - d);
+        }
       }
       if (e.type === 'zone_complete') {
         state.stats.totalSessions = Math.max(0, state.stats.totalSessions - 1);
@@ -1467,6 +1519,16 @@ const ZoneApp = (() => {
           state.stats.history[today].sessions = Math.max(0, (state.stats.history[today].sessions || 0) - 1);
           state.stats.history[today].focusMin = Math.max(0, (state.stats.history[today].focusMin || 0) - dur);
         }
+        if (zst) {
+          if (hadTimerToday) zst.completes = Math.max(0, zst.completes - 1);
+          else zst.doneNoTimer = Math.max(0, zst.doneNoTimer - 1);
+        }
+      }
+      if ((e.type === 'skip_block' || e.type === 'skip_zone') && zst) {
+        zst.skips = Math.max(0, zst.skips - 1);
+      }
+      if (e.type === 'pause' && zst) {
+        zst.pauses = Math.max(0, (zst.pauses || 0) - 1);
       }
       if (e.type === 'skip_block' && e.blockType === 'focus') {
         const partial = Math.round((((z?.focusDuration || 25) * 60) - (e.remaining || 0)) / 60);
@@ -1487,11 +1549,13 @@ const ZoneApp = (() => {
     });
     state.tracking.log = state.tracking.log.filter(e => !(e.zoneIdx === idx && e.date === today));
 
-    // BUG FIX: this used to hard-reset zoneStats[idx] to all zeros — wiping
-    // out ALL-TIME analytics for the zone (sessions/skips/pauses/totalMin/
-    // completes across every previous day), even though only TODAY's log
-    // entries were actually removed above. Rebuild from what's left instead.
-    rebuildZoneStatsFromLog(idx);
+    // BUG FIX: this used to call rebuildZoneStatsFromLog(idx), which recomputed
+    // zoneStats[idx] purely from state.tracking.log. That's lossy once old
+    // events have been archived out of the raw log (see logEvent's trim) —
+    // it would silently drop every archived day's contribution for this zone,
+    // shrinking its all-time totals. Precise decrementing above (only for the
+    // entries actually being removed) fixes this without needing to know
+    // anything about history that's no longer in the live log.
 
     // Reset timer state
     zs.running = false;
@@ -1741,7 +1805,7 @@ const ZoneApp = (() => {
         <div class="modal-body">
           <div><span class="field-label">Title</span><input type="text" id="ev-title" placeholder="e.g. Physics coaching" autofocus></div>
           <div class="field-row">
-            <div><span class="field-label">Date</span><input type="date" id="ev-date" value="${prefillDate || new Date().toISOString().slice(0,10)}"></div>
+            <div><span class="field-label">Date</span><input type="date" id="ev-date" value="${prefillDate || localDateKey()}"></div>
             <div><span class="field-label">Start</span><input type="time" id="ev-start" value="${new Date().toTimeString().slice(0,5)}"></div>
             <div><span class="field-label">End</span><input type="time" id="ev-end" value="${new Date(Date.now() + 3600000).toTimeString().slice(0,5)}"></div>
           </div>
@@ -1927,7 +1991,7 @@ const ZoneApp = (() => {
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      const key = localDateKey(d);
       const dayData = ts.dailyMap[key];
       const min = dayData?.focusMin || 0;
       const isToday = key === today;
@@ -3265,7 +3329,7 @@ const ZoneApp = (() => {
   function clearStats() {
     if (confirm('Clear all study statistics?')) {
       state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
-      state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
+      state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {}, archivedDaily: {} };
       storage().set('stats', state.stats);
       storage().set('tracking', state.tracking);
       renderTabBody();
@@ -3277,7 +3341,7 @@ const ZoneApp = (() => {
     if (!confirm('Reset all data? This cannot be undone.')) return;
     state._clearingData = true;
     state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
-    state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {} };
+    state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {}, archivedDaily: {} };
     state.events = [];
     state.config = { identity: {}, zones: [] };
     state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker', autoStartBreaks: true, flowMode: false, timerPreset: 'custom', soundPack: 'default' };
