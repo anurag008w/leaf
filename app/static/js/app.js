@@ -3645,36 +3645,47 @@ const ZoneApp = (() => {
     const savedExamDates = storage().get('examDates');
     if (savedExamDates) state.examDates = savedExamDates;
 
-    // load server-side data as fallback (cross-device sync)
+    // load server-side data (cross-device sync — server is source of truth)
     if (!isGuest()) {
       try {
         const serverData = await fetchJSON('/api/user-data');
         if (serverData) {
-          if (serverData.session && !loadSession()) {
+          if (serverData.session) {
             storage().set('session', serverData.session);
           }
-          if (!storage().get('stats') && serverData.stats) {
+          if (serverData.stats) {
             storage().set('stats', serverData.stats);
             Object.assign(state.stats, serverData.stats);
           }
-          if (!storage().get('tracking') && serverData.tracking) {
+          if (serverData.tracking) {
+            const local = state.tracking.log || [];
+            const serverLog = serverData.tracking.log || [];
+            const localIds = new Set(local.map(e => e.id));
+            const merged = [...serverLog.filter(e => !localIds.has(e.id)), ...local];
+            merged.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+            serverData.tracking.log = merged;
+            if (!serverData.tracking.archivedDaily) serverData.tracking.archivedDaily = {};
+            const localArchived = state.tracking.archivedDaily || {};
+            Object.keys(localArchived).forEach(k => {
+              if (!serverData.tracking.archivedDaily[k]) serverData.tracking.archivedDaily[k] = localArchived[k];
+            });
             storage().set('tracking', serverData.tracking);
             state.tracking = serverData.tracking;
           }
-          if (!storage().get('events') && serverData.events) {
+          if (serverData.events) {
             storage().set('events', serverData.events);
             state.events = serverData.events;
           }
-          if (!storage().get('settings') && serverData.settings) {
+          if (serverData.settings) {
             storage().set('settings', serverData.settings);
             Object.assign(state.settings, serverData.settings);
             applyTheme(state.settings.theme || 'hacker');
           }
-          if (!storage().get('examTrack') && serverData.examTrack) {
+          if (serverData.examTrack) {
             storage().set('examTrack', serverData.examTrack);
             state.examTrack = serverData.examTrack;
           }
-          if (!storage().get('examDates') && serverData.examDates) {
+          if (serverData.examDates) {
             storage().set('examDates', serverData.examDates);
             state.examDates = serverData.examDates;
           }
