@@ -2175,13 +2175,22 @@ const ZoneApp = (() => {
     const zones = getZones();
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
     const events = log.filter(e => e.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const timerSessions = events.filter(e => e.type === 'session_complete').length;
+    // BUG FIX: once a day's raw events have been trimmed out of `log` (see
+    // logEvent's archiveOldEvents), `events` here is empty even though the
+    // History table row for this same date (getTrackingStats()) still shows
+    // its real totals from tracking.archivedDaily. Without this, clicking an
+    // archived day's row showed "No activity" and all-zero stats — directly
+    // contradicting the row that was just clicked. Fall back to the archived
+    // per-day summary when there's no live log left for this date.
+    const archived = events.length === 0 ? (state.tracking.archivedDaily || {})[date] : null;
+    const timerSessions = archived ? archived.sessions : events.filter(e => e.type === 'session_complete').length;
     const zonesWithTimerPerDay = new Set(events.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
-    const manualDone = events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).length;
-    const totalFocus = events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
+    const manualDone = archived ? archived.manualDone : events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).length;
+    const totalFocus = archived ? archived.focusMin
+      : events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
       + events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
     const sessions = timerSessions + manualDone;
-    const skips = events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+    const skips = archived ? archived.skips : events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
     const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
     const dateObj = new Date(date + 'T00:00:00');
     const label = dateObj.toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -2228,7 +2237,8 @@ const ZoneApp = (() => {
         })()}
         <div style="font-size:12px;font-weight:600;margin:16px 0 10px;letter-spacing:1px">Timeline</div>
         <div class="event-timeline" style="max-height:300px;overflow-y:auto">
-          ${events.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No activity on this day</div>'
+          ${archived ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">Detailed event log for this day has been archived — only the summary totals above are kept.</div>'
+          : events.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No activity on this day</div>'
           : events.map(e => {
             const icon = iconMap[e.type] || '•';
             const cls = clsMap[e.type] || '';
