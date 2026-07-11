@@ -3684,82 +3684,89 @@ const ZoneApp = (() => {
       return;
     }
 
-    const savedSettings = storage().get('settings');
-    if (savedSettings) Object.assign(state.settings, savedSettings);
-    applyTheme(state.settings.theme || 'hacker');
-    initThemeEffects();
-
-    const savedEvents = storage().get('events');
-    if (Array.isArray(savedEvents)) state.events = savedEvents;
-
-    const savedStats = storage().get('stats');
-    if (savedStats) { if (typeof savedStats.totalSessions !== 'number') savedStats.totalSessions = 0; if (typeof savedStats.totalFocusMin !== 'number') savedStats.totalFocusMin = 0; Object.assign(state.stats, savedStats); }
-
-    const savedTracking = storage().get('tracking');
-    if (savedTracking) { if (!Array.isArray(savedTracking.log)) savedTracking.log = []; Object.assign(state.tracking, savedTracking); }
-
-    const savedExam = storage().get('examTrack');
-    if (savedExam) state.examTrack = savedExam;
-
-    const savedExamDates = storage().get('examDates');
-    if (savedExamDates) state.examDates = savedExamDates;
-
-    // load server-side data (cross-device sync — server is source of truth)
+    // ── Step 1: Load server data FIRST for authenticated users (source of truth) ──
+    let serverData = null;
     if (!isGuest()) {
       try {
-        const serverData = await fetchJSON('/api/user-data');
-        if (serverData) {
-          if (serverData.session) {
-            storage().set('session', serverData.session);
-          }
-          if (serverData.stats) {
-            storage().set('stats', serverData.stats);
-            Object.assign(state.stats, serverData.stats);
-          }
-          if (serverData.tracking) {
-            const local = state.tracking.log || [];
-            const serverLog = serverData.tracking.log || [];
-            const localIds = new Set(local.map(e => e.id));
-            const merged = [...serverLog.filter(e => !localIds.has(e.id)), ...local];
-            merged.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-            serverData.tracking.log = merged;
-            if (!serverData.tracking.archivedDaily) serverData.tracking.archivedDaily = {};
-            const localArchived = state.tracking.archivedDaily || {};
-            Object.keys(localArchived).forEach(k => {
-              if (!serverData.tracking.archivedDaily[k]) serverData.tracking.archivedDaily[k] = localArchived[k];
-            });
-            storage().set('tracking', serverData.tracking);
-            state.tracking = serverData.tracking;
-          }
-          if (serverData.events && Array.isArray(serverData.events)) {
-            // ID-based merge: keep local events not on server, plus all server events
-            const localEvts = state.events || [];
-            const serverIds = new Set(serverData.events.map(e => e.id));
-            const localOnly = localEvts.filter(e => e.id && !serverIds.has(e.id));
-            const merged = [...serverData.events, ...localOnly];
-            storage().set('events', merged);
-            state.events = merged;
-          }
-          if (serverData.settings) {
-            storage().set('settings', serverData.settings);
-            Object.assign(state.settings, serverData.settings);
-            applyTheme(state.settings.theme || 'hacker');
-          }
-          if (serverData.examTrack) {
-            storage().set('examTrack', serverData.examTrack);
-            state.examTrack = serverData.examTrack;
-          }
-          if (serverData.examDates) {
-            storage().set('examDates', serverData.examDates);
-            state.examDates = serverData.examDates;
-          }
-          if (serverData.onboarded && !storage().get('onboarded')) {
-            storage().set('onboarded', true);
-            state.onboarded = true;
-          }
-        }
+        serverData = await fetchJSON('/api/user-data');
       } catch {}
     }
+
+    // ── Step 2: Apply server data (server wins for everything except tracking.log merge) ──
+    if (serverData) {
+      if (serverData.session) {
+        storage().set('session', serverData.session);
+      }
+      if (serverData.stats) {
+        storage().set('stats', serverData.stats);
+        state.stats = serverData.stats;
+      }
+      if (serverData.tracking) {
+        // Tracking log: ID-based merge (log entries are append-only, both sides valid)
+        const localLog = state.tracking.log || [];
+        const serverLog = serverData.tracking.log || [];
+        const localIds = new Set(localLog.map(e => e.id));
+        const merged = [...serverLog.filter(e => !localIds.has(e.id)), ...localLog];
+        merged.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        serverData.tracking.log = merged;
+        if (!serverData.tracking.archivedDaily) serverData.tracking.archivedDaily = {};
+        const localArchived = state.tracking.archivedDaily || {};
+        Object.keys(localArchived).forEach(k => {
+          if (!serverData.tracking.archivedDaily[k]) serverData.tracking.archivedDaily[k] = localArchived[k];
+        });
+        storage().set('tracking', serverData.tracking);
+        state.tracking = serverData.tracking;
+      }
+      // Events: server is complete source of truth (no merge — deletions must propagate)
+      if (serverData.events && Array.isArray(serverData.events)) {
+        storage().set('events', serverData.events);
+        state.events = serverData.events;
+      }
+      if (serverData.settings) {
+        storage().set('settings', serverData.settings);
+        state.settings = serverData.settings;
+        applyTheme(state.settings.theme || 'hacker');
+      }
+      if (serverData.examTrack) {
+        storage().set('examTrack', serverData.examTrack);
+        state.examTrack = serverData.examTrack;
+      }
+      if (serverData.examDates) {
+        storage().set('examDates', serverData.examDates);
+        state.examDates = serverData.examDates;
+      }
+      if (serverData.onboarded) {
+        storage().set('onboarded', true);
+        state.onboarded = true;
+      }
+    }
+
+    // ── Step 3: localStorage fallback only for things server didn't return ──
+    if (!isGuest() && serverData) {
+      // Server data loaded — localStorage cache is stale, skip it
+    } else {
+      // Guest or server unavailable — use localStorage
+      const savedSettings = storage().get('settings');
+      if (savedSettings) Object.assign(state.settings, savedSettings);
+
+      const savedEvents = storage().get('events');
+      if (Array.isArray(savedEvents)) state.events = savedEvents;
+
+      const savedStats = storage().get('stats');
+      if (savedStats) { if (typeof savedStats.totalSessions !== 'number') savedStats.totalSessions = 0; if (typeof savedStats.totalFocusMin !== 'number') savedStats.totalFocusMin = 0; Object.assign(state.stats, savedStats); }
+
+      const savedTracking = storage().get('tracking');
+      if (savedTracking) { if (!Array.isArray(savedTracking.log)) savedTracking.log = []; Object.assign(state.tracking, savedTracking); }
+
+      const savedExam = storage().get('examTrack');
+      if (savedExam) state.examTrack = savedExam;
+
+      const savedExamDates = storage().get('examDates');
+      if (savedExamDates) state.examDates = savedExamDates;
+    }
+    // Always init theme effects
+    applyTheme(state.settings.theme || 'hacker');
+    initThemeEffects();
 
     const onboarded = storage().get('onboarded');
     if (onboarded) {
