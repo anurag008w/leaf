@@ -139,6 +139,7 @@ const ZoneApp = (() => {
   }
 
   function getMergedEvents() {
+    if (!Array.isArray(state.events)) state.events = [];
     return [...getDefaultEvents(), ...state.events];
   }
 
@@ -3682,7 +3683,7 @@ const ZoneApp = (() => {
     initThemeEffects();
 
     const savedEvents = storage().get('events');
-    if (savedEvents) state.events = savedEvents;
+    if (Array.isArray(savedEvents)) state.events = savedEvents;
 
     const savedStats = storage().get('stats');
     if (savedStats) { if (typeof savedStats.totalSessions !== 'number') savedStats.totalSessions = 0; if (typeof savedStats.totalFocusMin !== 'number') savedStats.totalFocusMin = 0; Object.assign(state.stats, savedStats); }
@@ -3725,7 +3726,7 @@ const ZoneApp = (() => {
           }
           if (serverData.events) {
             storage().set('events', serverData.events);
-            state.events = serverData.events;
+            if (Array.isArray(serverData.events)) state.events = serverData.events;
           }
           if (serverData.settings) {
             storage().set('settings', serverData.settings);
