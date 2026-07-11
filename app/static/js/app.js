@@ -251,7 +251,11 @@ const ZoneApp = (() => {
     };
     Object.entries(beaconData).forEach(([k, v]) => {
       try {
-        navigator.sendBeacon('/api/user-data', new Blob([JSON.stringify({ key: k, value: v })], { type: 'application/json' }));
+        const payload = JSON.stringify({ key: k, value: v });
+        // sendBeacon silently drops payloads > 64 KiB; fall back to keepalive fetch
+        if (!navigator.sendBeacon('/api/user-data', new Blob([payload], { type: 'application/json' }))) {
+          fetch('/api/user-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+        }
       } catch {}
     });
   }

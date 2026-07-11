@@ -2,7 +2,8 @@
 cd "$(dirname "$0")"
 export ZONE_USERNAME="${ZONE_USERNAME:-admin}"
 if [ -z "$ZONE_PASSWORD" ]; then
-  export ZONE_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+  ZONE_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))") || { echo "failed to generate ZONE_PASSWORD"; exit 1; }
+  export ZONE_PASSWORD
   echo "⚠️  ZONE_PASSWORD not set — generated random password: $ZONE_PASSWORD"
   echo "   Save this if you need to log in later."
 fi
