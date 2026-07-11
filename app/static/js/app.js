@@ -26,6 +26,9 @@ const ZoneApp = (() => {
   let $root, $toastContainer;
 
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  // Escape for JavaScript string context inside HTML onclick="" attributes
+  // (HTML entities are decoded before JS execution, so esc() alone is NOT sufficient)
+  const jsEsc = s => String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"').replace(/</g,'\\x3c').replace(/>/g,'\\x3e');
   const uid = () => Math.random().toString(36).slice(2,9);
 
   // Robust JSON parse for user-imported files: strips UTF-8 BOM (common from
@@ -129,12 +132,26 @@ const ZoneApp = (() => {
 
   function getDefaultEvents() {
     if (!state.settings.showDefaultEvents) return [];
-    const year = calYear || new Date().getFullYear();
-    if (defaultEventsYear === year && defaultEventsCache) return defaultEventsCache;
-    defaultEventsYear = year;
-    defaultEventsCache = generateHolidays(year).map(h => ({
-      ...h, id: 'default-' + h.date + '-' + h.title.replace(/[^a-z0-9]/gi,'').slice(0,8), default: true
-    }));
+    const viewYear = calYear || new Date().getFullYear();
+    const currentYear = new Date().getFullYear();
+    // Cache key includes both years to avoid stale results
+    const cacheKey = `${viewYear}:${currentYear}`;
+    if (defaultEventsYear === cacheKey && defaultEventsCache) return defaultEventsCache;
+    defaultEventsYear = cacheKey;
+    const events = new Map();
+    // Always include current year holidays so "Today's Events" never loses them
+    generateHolidays(currentYear).forEach(h => {
+      const id = 'default-' + h.date + '-' + h.title.replace(/[^a-z0-9]/gi,'').slice(0,8);
+      events.set(id, { ...h, id, default: true });
+    });
+    // If viewing a different year in the calendar, also include those
+    if (viewYear !== currentYear) {
+      generateHolidays(viewYear).forEach(h => {
+        const id = 'default-' + h.date + '-' + h.title.replace(/[^a-z0-9]/gi,'').slice(0,8);
+        if (!events.has(id)) events.set(id, { ...h, id, default: true });
+      });
+    }
+    defaultEventsCache = [...events.values()];
     return defaultEventsCache;
   }
 
@@ -259,6 +276,12 @@ const ZoneApp = (() => {
         }
       } catch {}
     });
+    // Also persist config via beacon (separate endpoint from user-data)
+    // sendBeacon only supports POST, but config needs PUT — use keepalive fetch
+    try {
+      const cfgPayload = JSON.stringify(state.config);
+      fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: cfgPayload, keepalive: true }).catch(() => {});
+    } catch {}
   }
 
   function saveState() {
@@ -291,7 +314,7 @@ const ZoneApp = (() => {
 
   function saveConfig() {
     storage().set('config', state.config);
-    try { apiUpdateConfig(state.config); } catch {}
+    apiUpdateConfig(state.config).catch(() => toast('Config sync failed — saved locally only', 'warning'));
   }
 
   // ─── Sound ───────────────────────────────────
@@ -299,6 +322,8 @@ const ZoneApp = (() => {
     try {
       if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = state.audioCtx;
+      // Resume suspended context (browser autoplay policy blocks audio outside user gesture)
+      if (ctx.state === 'suspended') ctx.resume();
       setTimeout(() => {
         const osc = ctx.createOscillator(), gain = ctx.createGain();
         osc.frequency.value = freq; osc.type = 'sine';
@@ -400,7 +425,7 @@ const ZoneApp = (() => {
   const apiConfig = () => fetchJSON('/api/config');
   const apiTracks = () => fetchJSON('/api/exam-tracks');
   const apiUpdateConfig = (data) => fetchJSON('/api/config', {
-    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data), keepalive: true
   });
 
   // ─── Toast ───────────────────────────────────
@@ -538,6 +563,10 @@ const ZoneApp = (() => {
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
         dailyMap[date].skips++;
+        // Count partial focus time from skipped blocks (duration field added in timerSkip)
+        if (e.type === 'skip_block' && e.duration > 0) {
+          dailyMap[date].focusMin += e.duration;
+        }
       }
       if (e.type === 'overtime') {
         dailyMap[date].focusMin += Math.round((e.seconds || 0) / 60);
@@ -796,7 +825,7 @@ const ZoneApp = (() => {
         if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
         state.stats.history[key].focusMin += partial;
       }
-      logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining });
+      logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining, duration: partial > 0 ? partial : 0 });
     }
     zs.remaining = 0;
     zs.elapsed = 0;
@@ -947,8 +976,16 @@ const ZoneApp = (() => {
 
     const evData = { zoneIdx: idx, zoneName: z?.title };
     state.tracking.log.push({ id: uid(), date: todayKey(), time: new Date().toISOString(), type: 'zone_complete', ...evData });
+    // Truncate log if too large (same logic as logEvent)
+    if (state.tracking.log.length > 5000) {
+      let removeCount = state.tracking.log.length - 3000;
+      const cutDate = state.tracking.log[removeCount - 1]?.date;
+      while (removeCount < state.tracking.log.length && state.tracking.log[removeCount].date === cutDate) removeCount++;
+      archiveOldEvents(state.tracking.log.splice(0, removeCount));
+    }
     if (!state.tracking.zoneStats[idx]) state.tracking.zoneStats[idx] = { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 };
     state.tracking.zoneStats[idx].doneNoTimer++;
+    if (z) state.tracking.zoneStats[idx].totalMin += (z.focusDuration || 25);
     const key = todayKey();
     if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
     state.stats.totalSessions++;
@@ -1048,6 +1085,7 @@ const ZoneApp = (() => {
 
   // ─── SET EXAM TRACK ─────────────────────────
   async function setExamTrack(trackId, year) {
+    if (!state.tracks) { toast('Exam tracks not loaded yet', 'error'); return; }
     const track = state.tracks.find(t => t.id === trackId);
     if (!track) return;
     const y = year || new Date().getFullYear();
@@ -1065,6 +1103,7 @@ const ZoneApp = (() => {
     state.config.identity.examTrack = track.name;
     state.config.identity.goalName = info.goal;
     state.config.identity.tagline = info.tag;
+    state.config.identity.targetYear = y;
     const trackZones = track.zones.map((tz, i) => {
       const existing = state.config.zones[i] || {};
       return {
@@ -1087,7 +1126,11 @@ const ZoneApp = (() => {
     // Preserve any extra zones beyond the track's default 5
     const extraZones = (state.config.zones || []).slice(track.zones.length);
     state.config.zones = trackZones.concat(extraZones);
-    await apiUpdateConfig(state.config);
+    try {
+      await apiUpdateConfig(state.config);
+    } catch (e) {
+      console.warn('setExamTrack: API config save failed', e);
+    }
     storage().set('config', state.config);
     state.onboarded = true;
     storage().set('onboarded', true);
@@ -1196,7 +1239,11 @@ const ZoneApp = (() => {
 
     if (state.dayComplete) {
       const todayEvents = getTodayLog();
-      const focusMin = todayEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0) + todayEvents.filter(e => e.type === 'overtime').reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
+      const focusMin = todayEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0) + todayEvents.filter(e => e.type === 'overtime').reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0)
+        + todayEvents.filter(e => e.type === 'zone_complete').reduce((a, e) => {
+          const zonesWithTimer = new Set(todayEvents.filter(ev => ev.type === 'session_complete').map(ev => ev.zoneIdx));
+          return zonesWithTimer.has(e.zoneIdx) ? a : a + (getZone(e.zoneIdx)?.focusDuration || 25);
+        }, 0);
       const sessions = todayEvents.filter(e => e.type === 'session_complete').length;
       const pauses = todayEvents.filter(e => e.type === 'pause').length;
       const stops = todayEvents.filter(e => e.type === 'stop').length;
@@ -1516,6 +1563,7 @@ const ZoneApp = (() => {
     zs.total = (z.focusDuration || 25) * 60;
     zs.elapsed = 0;
     zs.zoneElapsed = 0;
+    zs.lastTick = Date.now();   // prevent stale delta on next tick
     if (!zs.running) stopTimer();
     renderAll();
   }
@@ -1633,13 +1681,16 @@ const ZoneApp = (() => {
     if (lbl) lbl.innerHTML = zones.map((z, i) => `<span style="color:${state.currentZoneIdx === i ? z.color : ''}" onclick="ZoneApp.selectZone(${i})">${esc(z.title)}</span>`).join('');
   }
 
+  let _tickRenderCount = 0;
   function updateTimerDisplay() {
     const zs = getCurrentZs();
     if (!zs) return;
     renderTimerArea();
     renderControls();
     renderDayProgress();
-    renderSidebar();
+    // Sidebar only needs rebuilding when state changes, not every tick (~every 10s)
+    _tickRenderCount++;
+    if (_tickRenderCount % 10 === 0) renderSidebar();
   }
 
   function tickClock() {
@@ -1783,13 +1834,13 @@ const ZoneApp = (() => {
           <div id="calTodayEvents">
             ${todayEvents.length === 0
               ? '<div class="cal-empty">Tap a date on the calendar to add or view events</div>'
-              : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${e.id}')`}">
+              : todayEvents.map(e => `<div class="cal-event-row ${e.default ? 'cal-default' : ''}" onclick="${e.default ? '' : `ZoneApp.showEditEvent('${jsEsc(e.id)}')`}">
                   <div class="cal-event-bar" style="background:${e.color}"></div>
                   <span class="cal-event-time">${esc(e.start || '──')}${e.end ? '–' + esc(e.end) : ''}</span>
                   <span class="cal-event-title">${esc(e.title)}${e.notes ? ` <span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">(${esc(e.notes)})</span>` : ''}</span>
                   <span class="cal-event-type">${e.type}</span>
                   ${e.default ? '<span style="font-size:9px;color:var(--text-muted);font-family:var(--mono)">DEFAULT</span>'
-                    : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}')" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>`}
+                    : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${jsEsc(e.id)}')" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>`}
                 </div>`).join('')}
           </div>
         </div>
@@ -1818,11 +1869,11 @@ const ZoneApp = (() => {
           ${dayEvents.length > 0 ? `
             <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);letter-spacing:1px">${dayEvents.length} EVENT${dayEvents.length !== 1 ? 'S' : ''}</div>
             ${dayEvents.map(e => `
-              <div class="cal-event-row ${e.default ? 'cal-default' : ''}" style="cursor:pointer;padding:10px 12px;background:var(--bg-2);border-radius:8px;${e.default ? 'opacity:0.85' : ''}" onclick="${e.default ? '' : `ZoneApp.closeAndEditEvent('${e.id}')`}">
+              <div class="cal-event-row ${e.default ? 'cal-default' : ''}" style="cursor:pointer;padding:10px 12px;background:var(--bg-2);border-radius:8px;${e.default ? 'opacity:0.85' : ''}" onclick="${e.default ? '' : `ZoneApp.closeAndEditEvent('${jsEsc(e.id)}')`}">
                 <div class="cal-event-bar" style="background:${e.color}"></div>
                 <span class="cal-event-time">${esc(e.start || '──')}${e.end ? '–' + esc(e.end) : ''}</span>
                 <div style="flex:1"><span class="cal-event-title">${esc(e.title)}</span><br><span style="font-size:10px;color:var(--text-muted)">${e.default ? '· Default · ' : ''}${e.type}${e.notes ? ' · ' + esc(e.notes) : ''}</span></div>
-                ${e.default ? '' : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${e.id}');this.closest('.modal-overlay').querySelector('.close-x').click()" style="width:24px;height:24px;font-size:11px">✕</button>`}
+                ${e.default ? '' : `<button class="btn-mini" onclick="event.stopPropagation();ZoneApp.deleteEvent('${jsEsc(e.id)}');this.closest('.modal-overlay').querySelector('.close-x').click()" style="width:24px;height:24px;font-size:11px">✕</button>`}
               </div>`).join('')}
           ` : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;text-align:center">No events on this day</div>'}
         </div>
@@ -1913,10 +1964,10 @@ const ZoneApp = (() => {
           <div><span class="field-label">Notes</span><input type="text" id="ev-edit-notes" value="${esc(ev.notes || '')}"></div>
         </div>
         <div class="modal-footer" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <button class="ctl" style="color:var(--danger);border-color:rgba(242,107,107,0.3)" onclick="ZoneApp.deleteEvent('${ev.id}');this.closest('.modal-overlay').remove()">🗑 Delete</button>
+          <button class="ctl" style="color:var(--danger);border-color:rgba(242,107,107,0.3)" onclick="ZoneApp.deleteEvent('${jsEsc(ev.id)}');this.closest('.modal-overlay').remove()">🗑 Delete</button>
           <div style="display:flex;gap:8px">
             <button class="ctl" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-            <button class="ctl primary" onclick="ZoneApp.updateEvent('${ev.id}', this)">Save Changes</button>
+            <button class="ctl primary" onclick="ZoneApp.updateEvent('${jsEsc(ev.id)}', this)">Save Changes</button>
           </div>
         </div>
       </div>`;
@@ -1975,19 +2026,18 @@ const ZoneApp = (() => {
         const data = parseImportedJSON(reader.result);
         const events = data.events || data;
         if (!Array.isArray(events) || events.length === 0) { toast('No events found in file', 'error'); return; }
-        const count = events.filter(e => e.title && e.date).length;
-        if (count === 0) { toast('Invalid event data', 'error'); return; }
-        const existingIds = new Set((state.events || []).map(e => e.id));
-        events.forEach(e => {
-          if (!e.id || existingIds.has(e.id)) e.id = uid();
+        // Only import events that have both title AND date — reject ghosts
+        const valid = events.filter(e => e.title && e.date);
+        if (valid.length === 0) { toast('Invalid event data', 'error'); return; }
+        valid.forEach(e => {
+          e.id = uid();
           if (!e.color) e.color = '#38BDF8';
-          existingIds.add(e.id);
         });
         if (!Array.isArray(state.events)) state.events = [];
-        state.events = [...state.events, ...events];
+        state.events = [...state.events, ...valid];
         saveState();
         renderCalendarTab();
-        toast(`Imported ${count} events!`, 'success');
+        toast(`Imported ${valid.length} events!`, 'success');
       } catch (e) { toast('Invalid JSON file', 'error'); }
     };
     reader.readAsText(file);
@@ -2227,7 +2277,8 @@ const ZoneApp = (() => {
     const manualDone = archived ? archived.manualDone : events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).length;
     const totalFocus = archived ? archived.focusMin
       : events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
-      + events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0);
+      + events.filter(e => e.type === 'zone_complete' && !zonesWithTimerPerDay.has(e.zoneIdx)).reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0)
+      + events.filter(e => e.type === 'overtime').reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
     const sessions = timerSessions + manualDone;
     const skips = archived ? archived.skips : events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
     const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
@@ -2467,7 +2518,9 @@ const ZoneApp = (() => {
   // ─── EXAM TIMER TAB ─────────────────────────
   function getExamDates() {
     const trackId = state.tracks?.find(t => t.name === state.examTrack)?.id;
-    const defaultsObj = EXAM_DATES_BY_TRACK();
+    // Use the user-selected target year from onboarding, fall back to current year + 1
+    const targetYear = state.config?.identity?.targetYear || new Date().getFullYear() + 1;
+    const defaultsObj = EXAM_DATES_BY_TRACK(targetYear);
     const defaults = defaultsObj[trackId] || defaultsObj.CUSTOM;
     const userDates = state.examDates || [];
     return defaults.map(d => {
@@ -3267,6 +3320,7 @@ const ZoneApp = (() => {
       timeLimit: 180, cycleTitles: []
     };
     zones.push(newZone);
+    saveConfig();
     renderTabBody();
     toast('New zone added!', 'success');
   }
@@ -3375,7 +3429,7 @@ const ZoneApp = (() => {
           if (z.timeLimit == null) z.timeLimit = z.type === 'buffer' ? 90 : 180;
           if (!z.cycleTitles) z.cycleTitles = [];
         });
-        storage().set('config', state.config);
+        saveConfig();
         resetDay();
         renderAll();
         toast('Schedule imported!', 'success');
@@ -3412,15 +3466,16 @@ const ZoneApp = (() => {
     state.dayComplete = false;
     state.currentZoneIdx = 0;
     stopTimer();
-    // Clear server data first
+    // Clear server data first — send proper default shapes so init() doesn't
+    // crash when it loads these back (e.g. tracking.zoneStats being undefined).
     try {
       await Promise.all([
         fetch('/api/config', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ zones: [], identity: {} }) }),
-        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'stats', value: {} }) }),
-        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'tracking', value: {} }) }),
-        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'events', value: {} }) }),
-        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'settings', value: {} }) }),
-        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: {} }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'stats', value: state.stats }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'tracking', value: state.tracking }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'events', value: [] }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'settings', value: state.settings }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: { currentZoneIdx: 0, byZone: {}, dayComplete: false } }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examTrack', value: null }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examDates', value: [] }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'onboarded', value: false }) }),
@@ -3438,6 +3493,7 @@ const ZoneApp = (() => {
     storage().set('stats', state.stats);
     storage().set('tracking', state.tracking);
     storage().set('settings', state.settings);
+    storage().set('config', state.config);
     storage().set('examTrack', null);
     storage().set('examDates', []);
     location.reload();
@@ -3692,6 +3748,17 @@ const ZoneApp = (() => {
       } catch {}
     }
 
+    // ── Step 1.5: Load local tracking so the merge below has both sides ──
+    if (!isGuest()) {
+      try {
+        const localTracking = storage().get('tracking');
+        if (localTracking) {
+          if (!Array.isArray(localTracking.log)) localTracking.log = [];
+          state.tracking = localTracking;
+        }
+      } catch {}
+    }
+
     // ── Step 2: Apply server data (server wins for everything except tracking.log merge) ──
     if (serverData) {
       if (serverData.session) {
@@ -3769,7 +3836,9 @@ const ZoneApp = (() => {
     initThemeEffects();
 
     const onboarded = storage().get('onboarded');
-    if (onboarded) {
+    if (onboarded && !serverData) {
+      // Only use localStorage onboarded when server data is unavailable
+      // (server already set state.onboarded in Step 2 if it had a value)
       state.onboarded = true;
       const sess = loadSession();
       if (sess && sess.byZone) {
@@ -3859,6 +3928,10 @@ const ZoneApp = (() => {
         return;
       }
       if (e.key === ' ' && state.tab === 'console') {
+        // Don't hijack spacebar when a button/link/select is focused — let native behavior fire
+        const tag = e.target?.tagName;
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'SELECT') return;
+        if (e.target?.getAttribute('role') === 'button') return;
         e.preventDefault();
         timerToggle();
       }

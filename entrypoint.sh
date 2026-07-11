@@ -18,4 +18,4 @@ python cronjob-keepalive-setup.py || echo "keepalive setup failed, continuing st
 #   FORWARDED_ALLOW_IPS=127.0.0.1 entrypoint.sh
 # This avoids trusting X-Forwarded-For from arbitrary peers, which bypasses
 # IP-based rate limiting.
-exec uvicorn app.main:app --host 0.0.0.0 --port 7860 --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-*}"
+exec uvicorn app.main:app --host 0.0.0.0 --port 7860 --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"

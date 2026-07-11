@@ -20,9 +20,18 @@ log = logging.getLogger("zone.sync")
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_USERNAME = os.environ.get("HF_USERNAME", "").strip()
 SYNC_DATASET = os.environ.get("SYNC_DATASET", "").strip() or "myos-backup"
-SYNC_INTERVAL = int(os.environ.get("SYNC_INTERVAL", "1800"))
-SYNC_UPLOAD_TIMEOUT = int(os.environ.get("SYNC_UPLOAD_TIMEOUT", "120"))
-SYNC_MAX_FILE_BYTES = int(os.environ.get("SYNC_MAX_FILE_BYTES", str(50 * 1024 * 1024)))
+try:
+    SYNC_INTERVAL = max(60, int(os.environ.get("SYNC_INTERVAL", "1800") or "1800"))
+except (ValueError, TypeError):
+    SYNC_INTERVAL = 1800
+try:
+    SYNC_UPLOAD_TIMEOUT = max(30, int(os.environ.get("SYNC_UPLOAD_TIMEOUT", "120") or "120"))
+except (ValueError, TypeError):
+    SYNC_UPLOAD_TIMEOUT = 120
+try:
+    SYNC_MAX_FILE_BYTES = max(1024, int(os.environ.get("SYNC_MAX_FILE_BYTES", str(50 * 1024 * 1024)) or str(50 * 1024 * 1024)))
+except (ValueError, TypeError):
+    SYNC_MAX_FILE_BYTES = 50 * 1024 * 1024
 
 DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
 PRUNE_BATCH_SIZE = 50
@@ -235,7 +244,19 @@ def restore():
                 dst = DATA_DIR / child.name
                 if child.is_dir():
                     if dst.exists():
-                        shutil.rmtree(dst, ignore_errors=True)
+                        try:
+                            shutil.rmtree(dst)
+                        except OSError as exc:
+                            log.warning("could not remove old dir %s during restore: %s", dst, exc)
+                            # Try to remove individual children instead of failing completely
+                            for sub in dst.iterdir():
+                                try:
+                                    if sub.is_dir():
+                                        shutil.rmtree(sub)
+                                    else:
+                                        sub.unlink()
+                                except OSError:
+                                    log.warning("could not remove %s during restore", sub)
                     shutil.copytree(child, dst)
                 else:
                     shutil.copy2(child, dst)

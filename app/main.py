@@ -85,12 +85,15 @@ def check_rate_limit(key: str) -> None:
         log.warning("rate limit hit for %s", key)
         raise HTTPException(429, "too many requests — try again later")
     attempts.append(now)
+    # NOTE: _login_attempts keys with empty lists are negligible memory (~70 bytes/IP).
+    # Do NOT pop empty keys here — it would skip recording the attempt above.
 
 def invalidate_user_sessions(username: str) -> None:
     for token, stored_uname in list(_token_users.items()):
         if stored_uname == username:
             _active_tokens.discard(token)
             del _token_users[token]
+            _token_created.pop(token, None)
     save_sessions()
 
 def expire_stale_tokens() -> None:
@@ -269,7 +272,11 @@ RESET_KEYS_FILE = DATA_DIR / "reset-keys.json"
 
 def load_reset_keys() -> list:
     if RESET_KEYS_FILE.exists():
-        return json.loads(RESET_KEYS_FILE.read_text())
+        try:
+            return json.loads(RESET_KEYS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            log.warning("corrupted reset keys file, returning empty list")
+            return []
     return []
 
 def save_reset_keys(keys: list) -> None:
@@ -296,6 +303,16 @@ def make_session(username: str) -> str:
     _active_tokens.add(token)
     _token_users[token] = username
     _token_created[token] = time.time()
+    # Cap per-user sessions to prevent unbounded growth
+    MAX_SESSIONS_PER_USER = 20
+    user_tokens = [t for t, u in _token_users.items() if u == username]
+    if len(user_tokens) > MAX_SESSIONS_PER_USER:
+        # Evict oldest sessions
+        user_tokens.sort(key=lambda t: _token_created.get(t, 0))
+        for old_token in user_tokens[:len(user_tokens) - MAX_SESSIONS_PER_USER]:
+            _active_tokens.discard(old_token)
+            _token_users.pop(old_token, None)
+            _token_created.pop(old_token, None)
     save_sessions()
     return token
 
@@ -452,6 +469,7 @@ async def guest_login(request: Request):
     check_rate_limit(rate_limit_key(request))
     token = GUEST_PREFIX + secrets.token_hex(16)
     _active_tokens.add(token)
+    _token_created[token] = time.time()
     save_sessions()
     resp = JSONResponse({"token": token, "guest": True})
     make_secure_cookie(resp, token)
@@ -715,6 +733,7 @@ async def sync_trigger(request: Request):
     global _sync_last_fp, _sync_last_mm
     if not HF_TOKEN:
         raise HTTPException(400, "HF_TOKEN not configured")
+    check_rate_limit(rate_limit_key(request))
     try:
         fp, mm = await asyncio.to_thread(zone_sync.sync_once, _sync_last_fp, _sync_last_mm)
         _sync_last_fp, _sync_last_mm = fp, mm
@@ -761,6 +780,10 @@ async def sync_import(body: SyncImportBody, request: Request):
     for key in USER_DATA_KEYS:
         if key in user_data:
             try:
+                raw = json.dumps(user_data[key])
+                if len(raw) > 5 * 1024 * 1024:
+                    errors.append(f"{key}: data too large (max 5 MB)")
+                    continue
                 write_user_data(uname, key, user_data[key])
             except Exception as e:
                 errors.append(f"{key}: {e}")
