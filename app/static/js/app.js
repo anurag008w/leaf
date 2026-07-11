@@ -3662,11 +3662,18 @@ const ZoneApp = (() => {
       state.isAdmin = au.isAdmin;
       state.username = au.username;
 
+      // Cross-device sync: server config is ALWAYS the source of truth for
+      // authenticated users. localStorage config is only used as fallback when
+      // server config is empty (fresh account, no saves yet).
       const savedCfg = storage().get('config');
-      if (savedCfg) {
-        if (savedCfg.zones?.length) state.config.zones = savedCfg.zones;
-        if (savedCfg.identity) Object.assign(state.config.identity ??= {}, savedCfg.identity);
+      if (!state.config?.zones?.length && savedCfg?.zones?.length) {
+        state.config.zones = savedCfg.zones;
       }
+      if (savedCfg?.identity && (!state.config.identity || !Object.keys(state.config.identity).length)) {
+        Object.assign(state.config.identity ??= {}, savedCfg.identity);
+      }
+      // Always update localStorage cache with server config so it stays fresh
+      if (state.config) storage().set('config', state.config);
 
       (state.config.zones || []).forEach(z => {
         if (z.timeLimit == null) z.timeLimit = z.type === 'buffer' ? 90 : 180;
@@ -3724,9 +3731,14 @@ const ZoneApp = (() => {
             storage().set('tracking', serverData.tracking);
             state.tracking = serverData.tracking;
           }
-          if (serverData.events) {
-            storage().set('events', serverData.events);
-            if (Array.isArray(serverData.events)) state.events = serverData.events;
+          if (serverData.events && Array.isArray(serverData.events)) {
+            // ID-based merge: keep local events not on server, plus all server events
+            const localEvts = state.events || [];
+            const serverIds = new Set(serverData.events.map(e => e.id));
+            const localOnly = localEvts.filter(e => e.id && !serverIds.has(e.id));
+            const merged = [...serverData.events, ...localOnly];
+            storage().set('events', merged);
+            state.events = merged;
           }
           if (serverData.settings) {
             storage().set('settings', serverData.settings);

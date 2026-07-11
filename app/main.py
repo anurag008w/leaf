@@ -316,7 +316,7 @@ async def lifespan(app: FastAPI):
         log.warning("ZONE_PASSWORD is not set — signup still works, but admin login is disabled")
 
     restore_ok = True
-    if HF_TOKEN and SYNC_RESTORE and not USERS_FILE.exists():
+    if HF_TOKEN and SYNC_RESTORE:
         try:
             restore_ok = await asyncio.to_thread(zone_sync.restore)
             if not restore_ok:
