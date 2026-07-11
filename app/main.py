@@ -224,6 +224,13 @@ def resolve_username(token: str) -> str | None:
 
 USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "onboarded"})
 
+# Default values per key — prevents _read_json returning {} for list-valued keys
+# when the file is missing/empty/corrupt (which crashes the JS spread operator).
+USER_DATA_DEFAULTS: dict[str, Any] = {
+    "events": [],
+    "examDates": [],
+}
+
 def read_user_data(uname: str) -> dict:
     if not uname:
         return {}
@@ -233,6 +240,9 @@ def read_user_data(uname: str) -> dict:
         p = d / f"{k}.json"
         if p.exists():
             out[k] = _read_json(p)
+            # Enforce expected type — fall back to default if file held wrong shape
+            if k in USER_DATA_DEFAULTS and type(out[k]) is not type(USER_DATA_DEFAULTS[k]):
+                out[k] = USER_DATA_DEFAULTS[k]
     return out
 
 def write_user_data(uname: str, key: str, value: Any) -> None:
@@ -354,7 +364,7 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://hf.space; frame-src 'none'; object-src 'none'"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://hf.space https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'none'; object-src 'none'"
     return resp
 
 # ── Auth middleware ───────────────────────────────
