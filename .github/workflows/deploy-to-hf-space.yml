@@ -1,9 +1,8 @@
 name: Sync to Hugging Face Space
 
-# Manual-only: this workflow does NOT run automatically on push. Trigger it
-# yourself from the Actions tab (Actions → Sync to Hugging Face Space →
-# Run workflow) whenever you want to push the current main branch to the
-# Space. Requires three repository secrets, set under Settings → Secrets
+# Auto-deploys to HF Space on every push to main.
+# Can also be triggered manually from the Actions tab.
+# Requires three repository secrets, set under Settings → Secrets
 # and variables → Actions:
 #
 #   HF_TOKEN       — a Hugging Face access token with WRITE permission
@@ -15,11 +14,10 @@ name: Sync to Hugging Face Space
 # Push strategy: try a normal push first (safest — fails loudly if the
 # Space has commits this branch doesn't know about), then fall back to
 # --force, then --force-with-lease, stopping at the first one that works.
-# Force-pushing overwrites the Space's git history with this repo's —
-# only use this if GitHub is meant to be the single source of truth for
-# the Space.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch: {}
 
 jobs:
