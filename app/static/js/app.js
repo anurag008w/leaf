@@ -3830,16 +3830,18 @@ const ZoneApp = (() => {
 
       const savedExamDates = storage().get('examDates');
       if (savedExamDates) state.examDates = savedExamDates;
+
+      if (storage().get('onboarded')) {
+        state.onboarded = true;
+      }
     }
     // Always init theme effects
     applyTheme(state.settings.theme || 'hacker');
     initThemeEffects();
 
-    const onboarded = storage().get('onboarded');
-    if (onboarded && !serverData) {
-      // Only use localStorage onboarded when server data is unavailable
-      // (server already set state.onboarded in Step 2 if it had a value)
-      state.onboarded = true;
+    if (state.onboarded) {
+      // Load session to restore timer states (byZone, currentZoneIdx, etc.)
+      // state.onboarded is set from serverData (Step 2) or localStorage (Step 3 fallback)
       const sess = loadSession();
       if (sess && sess.byZone) {
         const today = todayKey();
