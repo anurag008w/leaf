@@ -907,7 +907,6 @@ Each track comes with pre-configured zones. Selecting a track during onboarding 
 |:---|---|---|
 | `ZONE_USERNAME` | `admin` | Administrator account username |
 | `ZONE_DATA_DIR` | `./data` | Directory path for all persistent data files (users, sessions, configurations, and per-user data) |
-| `ZONE_SECRET` | Auto-generated on first run | Encryption master key for session tokens and sensitive data. Must be a 64-character hex string. **Keep this value stable across restarts in production** to maintain session validity. |
 
 ### Optional — Hugging Face Sync
 
@@ -1713,7 +1712,6 @@ pip install -r requirements.txt
 
 # Set environment variables
 export ZONE_PASSWORD=dev_password
-export ZONE_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 
 # Run development server
 python -m uvicorn app.main:app --host 0.0.0.0 --port 7860 --reload

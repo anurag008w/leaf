@@ -1,7 +1,11 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 export ZONE_USERNAME="${ZONE_USERNAME:-admin}"
-export ZONE_PASSWORD="${ZONE_PASSWORD:-admin2008}"
+if [ -z "$ZONE_PASSWORD" ]; then
+  export ZONE_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+  echo "⚠️  ZONE_PASSWORD not set — generated random password: $ZONE_PASSWORD"
+  echo "   Save this if you need to log in later."
+fi
 PORT=7860
 
 # Check if port is in use using /dev/tcp (bash built-in)

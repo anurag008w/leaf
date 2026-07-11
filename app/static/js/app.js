@@ -226,6 +226,36 @@ const ZoneApp = (() => {
     _pendingHttpSave = null;
   }
 
+  /* Force-save for beforeunload: bypasses all throttles */
+  function forceSave() {
+    const session = {
+      currentZoneIdx: state.currentZoneIdx,
+      byZone: state.byZone,
+      dayComplete: state.dayComplete,
+      date: todayKey()
+    };
+    storage().set('onboarded', state.onboarded);
+    storage().set('session', session);
+    storage().set('events', state.events);
+    storage().set('stats', state.stats);
+    storage().set('tracking', state.tracking);
+    storage().set('settings', state.settings);
+    storage().set('examTrack', state.examTrack);
+    storage().set('examDates', state.examDates);
+    if (isGuest()) return;
+    const beaconData = {
+      session, stats: state.stats, tracking: state.tracking,
+      events: state.events, settings: state.settings,
+      examTrack: state.examTrack, examDates: state.examDates,
+      onboarded: state.onboarded
+    };
+    Object.entries(beaconData).forEach(([k, v]) => {
+      try {
+        navigator.sendBeacon('/api/user-data', new Blob([JSON.stringify({ key: k, value: v })], { type: 'application/json' }));
+      } catch {}
+    });
+  }
+
   function saveState() {
     const now = Date.now();
     if (now - (state._lastStateSave || 0) < 2000) return;
@@ -369,10 +399,11 @@ const ZoneApp = (() => {
   });
 
   // ─── Toast ───────────────────────────────────
+
   function toast(msg, type = 'info', dur = 3500) {
     const el = document.createElement('div');
     el.className = 'toast ' + type;
-    el.innerHTML = `<span>${type === 'success' ? '✓' : type === 'warning' ? '⚠' : type === 'error' ? '✕' : 'ℹ'}</span><span>${msg}</span>`;
+    el.innerHTML = `<span>${type === 'success' ? '✓' : type === 'warning' ? '⚠' : type === 'error' ? '✕' : 'ℹ'}</span><span>${esc(msg)}</span>`;
     $toastContainer.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(8px)'; setTimeout(() => el.remove(), 300); }, dur);
   }
@@ -1029,7 +1060,7 @@ const ZoneApp = (() => {
     state.config.identity.examTrack = track.name;
     state.config.identity.goalName = info.goal;
     state.config.identity.tagline = info.tag;
-    state.config.zones = track.zones.map((tz, i) => {
+    const trackZones = track.zones.map((tz, i) => {
       const existing = state.config.zones[i] || {};
       return {
         id: tz.id ?? existing.id ?? i + 1,
@@ -1048,6 +1079,9 @@ const ZoneApp = (() => {
         cycleTitles: existing.cycleTitles || [],
       };
     });
+    // Preserve any extra zones beyond the track's default 5
+    const extraZones = (state.config.zones || []).slice(track.zones.length);
+    state.config.zones = trackZones.concat(extraZones);
     await apiUpdateConfig(state.config);
     storage().set('config', state.config);
     state.onboarded = true;
@@ -1485,7 +1519,7 @@ const ZoneApp = (() => {
     const z = getZone(idx);
     const zs = state.byZone[idx];
     if (!z || !zs) return;
-    if (!confirm(`Reset all progress for "${z.title}"?`)) return;
+    if (!confirm(`Reset today's progress for "${z.title}"?`)) return;
     logEvent('stop', { zoneIdx: idx, zoneName: z.title });
     stopTimer();
 
@@ -2444,10 +2478,10 @@ const ZoneApp = (() => {
 
     function ringSVG(target) {
       const diff = target - now;
-      const yr = new Date(target).getFullYear();
-      const start = new Date(yr + '-01-01').getTime();
+      const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+      const start = target - ONE_YEAR;
       const total = target - start;
-      const frac = diff > 0 ? Math.min(1, diff / total) : 0;
+      const frac = diff > 0 ? Math.min(1, Math.max(0, 1 - diff / total)) : 1;
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -2535,10 +2569,10 @@ const ZoneApp = (() => {
       if (tEl) tEl.textContent = days + ' days remaining';
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
-        const yr = new Date(target).getFullYear();
-        const start = new Date(yr + '-01-01').getTime();
+        const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+        const start = target - ONE_YEAR;
         const total = target - start;
-        const frac = diff > 0 ? Math.min(1, diff / total) : 0;
+        const frac = diff > 0 ? Math.min(1, Math.max(0, 1 - diff / total)) : 1;
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
@@ -2578,6 +2612,7 @@ const ZoneApp = (() => {
     }));
     state.examDates = dates;
     storage().set('examDates', dates);
+    saveUserDataToServer('examDates');
     const ov = btn?.closest('.modal-overlay');
     if (ov) ov.remove();
     renderTabBody();
@@ -2769,6 +2804,7 @@ const ZoneApp = (() => {
   let _themeFxCtx = null;
   let _themeFxRaf = null;
   let _themeFxParticles = [];
+  let _themeFxVisHandler = null;
 
   function initThemeEffects() {
     if (_themeFxRaf) { cancelAnimationFrame(_themeFxRaf); _themeFxRaf = null; }
@@ -2793,15 +2829,18 @@ const ZoneApp = (() => {
         _themeFxRaf = requestAnimationFrame(frame);
       }
       _themeFxRaf = requestAnimationFrame(frame);
-      document.addEventListener('visibilitychange', function onVis() {
+      if (_themeFxVisHandler) document.removeEventListener('visibilitychange', _themeFxVisHandler);
+      _themeFxVisHandler = function onVis() {
         if (document.hidden && _themeFxRaf) {
           cancelAnimationFrame(_themeFxRaf);
           _themeFxRaf = null;
         } else if (!document.hidden && !_themeFxRaf) {
           _themeFxRaf = requestAnimationFrame(frame);
         }
-      });
+      };
+      document.addEventListener('visibilitychange', _themeFxVisHandler);
     } else {
+      if (_themeFxVisHandler) { document.removeEventListener('visibilitychange', _themeFxVisHandler); _themeFxVisHandler = null; }
       if (_themeFxCanvas) _themeFxCanvas.style.display = 'none';
       if (_themeFxParticles.length) _themeFxParticles = [];
     }
@@ -3007,7 +3046,8 @@ const ZoneApp = (() => {
     const cur = document.getElementById('currentPwInput')?.value;
     const pw = document.getElementById('newPwInput')?.value;
     if (!cur || !pw) { toast('Fill in both fields', 'warning'); return; }
-    if (pw.length < 3) { toast('New password too short (min 3)', 'warning'); return; }
+    if (pw.length < 8) { toast('New password too short (min 8)', 'warning'); return; }
+    if (new TextEncoder().encode(pw).length > 72) { toast('Password too long (max 72 bytes — try shorter)', 'warning'); return; }
     try {
       const res = await fetchJSON('/api/change-password', {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -3227,7 +3267,9 @@ const ZoneApp = (() => {
   }
 
   function saveZoneEdits() {
-    const zones = getZones();
+    const liveZones = getZones();
+    // Work on a deep copy so live state isn't mutated until validation passes
+    const zones = liveZones.map(z => JSON.parse(JSON.stringify(z)));
     zones.forEach((z, i) => {
       const titleEl = document.getElementById(`ze-${i}-title`);
       if (titleEl) z.title = titleEl.value.trim() || z.title;
@@ -3297,6 +3339,7 @@ const ZoneApp = (() => {
     zones.splice(idx, 1);
     state.config.zones = zones;
     storage().set('config', state.config);
+    saveConfig();
     if (state.currentZoneIdx >= zones.length) state.currentZoneIdx = Math.max(0, zones.length - 1);
     rebuildZoneStates();
     renderTabBody();
@@ -3342,6 +3385,8 @@ const ZoneApp = (() => {
       state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {}, archivedDaily: {} };
       storage().set('stats', state.stats);
       storage().set('tracking', state.tracking);
+      saveUserDataToServer('stats');
+      saveUserDataToServer('tracking');
       renderTabBody();
       toast('Stats cleared', 'info');
     }
@@ -3350,6 +3395,7 @@ const ZoneApp = (() => {
   async function resetAll() {
     if (!confirm('Reset all data? This cannot be undone.')) return;
     state._clearingData = true;
+    if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     state.stats = { totalSessions: 0, totalFocusMin: 0, dayStart: null, history: {} };
     state.tracking = { log: [], zoneStats: {}, sessionCount: 0, dailyZones: {}, archivedDaily: {} };
     state.events = [];
@@ -3376,7 +3422,7 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -3394,9 +3440,10 @@ const ZoneApp = (() => {
 
   function logout() {
     state._clearingData = true;
+    if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -3715,6 +3762,29 @@ const ZoneApp = (() => {
               };
             }
           }
+          // Catch up elapsed time for any running zone from the previous day
+          // and log session_stop so events aren't left dangling
+          if (sess.byZone) {
+            Object.keys(sess.byZone).forEach(k => {
+              const zs = sess.byZone[k];
+              if (zs && zs.running && zs.lastTick) {
+                const elapsedSec = Math.max(0, Math.floor((Date.now() - zs.lastTick) / 1000));
+                if (elapsedSec > 0) {
+                  zs.elapsed = (zs.elapsed || 0) + elapsedSec;
+                  zs.zoneElapsed = (zs.zoneElapsed || 0) + elapsedSec;
+                  zs.remaining = Math.max(0, zs.remaining - elapsedSec);
+                }
+                // Log a partial session_stop for the in-progress block
+                logEvent('session_stop', {
+                  zoneIdx: parseInt(k),
+                  date: sess.date,
+                  reason: 'cross_midnight',
+                  elapsed: zs.elapsed || 0
+                });
+                zs.running = false;
+              }
+            });
+          }
           state.dayComplete = false;
           state.currentZoneIdx = 0;
           rebuildZoneStates();
@@ -3751,7 +3821,7 @@ const ZoneApp = (() => {
 
     render();
     window.addEventListener('beforeunload', e => {
-      if (!state._clearingData) saveState();
+      if (!state._clearingData) forceSave();
       const zs = getCurrentZs();
       if (zs && zs.running) {
         e.preventDefault();

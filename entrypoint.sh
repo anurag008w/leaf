@@ -13,4 +13,4 @@ fi
 
 python cronjob-keepalive-setup.py || echo "keepalive setup failed, continuing startup anyway"
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 7860
+exec uvicorn app.main:app --host 0.0.0.0 --port 7860 --forwarded-allow-ips "*"

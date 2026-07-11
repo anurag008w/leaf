@@ -177,7 +177,13 @@ def save_users(users: dict) -> None:
         log.warning("failed to save users: %s", e)
         raise
 
+def validate_password_length(pw: str) -> None:
+    """Raise if password exceeds bcrypt's 72-byte limit."""
+    if len(pw.encode("utf-8")) > 72:
+        raise HTTPException(400, "password too long (bcrypt limit is 72 bytes; use fewer characters or shorter passphrase)")
+
 def hash_password(pw: str) -> str:
+    validate_password_length(pw)
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 
 def check_password(pw: str, hashed: str) -> bool:
@@ -299,19 +305,23 @@ async def lifespan(app: FastAPI):
     if not ZONE_PASSWORD:
         log.warning("ZONE_PASSWORD is not set — signup still works, but admin login is disabled")
 
+    restore_ok = True
     if HF_TOKEN and SYNC_RESTORE and not USERS_FILE.exists():
         try:
-            await asyncio.to_thread(zone_sync.restore)
+            restore_ok = await asyncio.to_thread(zone_sync.restore)
+            if not restore_ok:
+                log.warning("HF restore returned False — skipping sync loop to prevent wiping remote backup")
         except Exception as exc:
-            log.warning("HF restore failed: %s", exc)
+            restore_ok = False
+            log.warning("HF restore failed: %s — skipping sync loop to prevent wiping remote backup", exc)
 
-    if HF_TOKEN:
+    if HF_TOKEN and restore_ok:
         global _sync_task, _sync_last_fp, _sync_last_mm
         _sync_task = asyncio.create_task(_sync_loop())
 
     yield
 
-    if HF_TOKEN:
+    if HF_TOKEN and _sync_task is not None:
         _sync_task.cancel()
         try:
             await _sync_task
@@ -355,8 +365,6 @@ async def auth_middleware(request: Request, call_next):
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
-        if path in ("/api/login", "/api/guest-login", "/api/signup", "/api/reset-password"):
-            return await call_next(request)
         token = request.cookies.get(COOKIE_NAME, "")
         if not token or token not in _active_tokens:
             return JSONResponse({"error": "unauthorized"}, 401)
@@ -386,7 +394,7 @@ async def auth_middleware(request: Request, call_next):
 async def signup(body: SignupBody, request: Request):
     check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
-    if not uname or len(uname) < 2 or not re.match(r"^[a-zA-Z0-9_-]+$", uname):
+    if not uname or len(uname) < 2 or len(uname) > 32 or not re.match(r"^[a-zA-Z0-9_-]+$", uname):
         raise HTTPException(400, "invalid signup data")
     if not body.password or len(body.password) < 8:
         raise HTTPException(400, "invalid signup data")
@@ -461,7 +469,7 @@ async def reset_password(body: ResetPasswordBody, request: Request):
     if not valid:
         raise HTTPException(403, "invalid admin password")
     uname = body.username.strip()
-    if not re.match(r'^[a-zA-Z0-9_.-]{1,64}$', uname):
+    if not re.match(r'^[a-zA-Z0-9_-]+$', uname) or len(uname) > 32:
         raise HTTPException(400, "invalid username format")
     users = load_users()
     if uname not in users:
@@ -528,12 +536,13 @@ class ChangeUsernameBody(BaseModel):
 
 @app.post("/api/change-username")
 async def change_username(body: ChangeUsernameBody, request: Request):
+    check_rate_limit(rate_limit_key(request))
     uname = getattr(request.state, "username", None)
     if not uname:
         raise HTTPException(401, "not authenticated")
     new_name = body.new_username.strip()
-    if not new_name or len(new_name) < 2:
-        raise HTTPException(400, "username too short")
+    if not new_name or len(new_name) < 2 or len(new_name) > 32:
+        raise HTTPException(400, "username too short or too long (max 32)")
     if not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
         raise HTTPException(400, "username can only contain letters, numbers, hyphens and underscores")
     if new_name == uname:

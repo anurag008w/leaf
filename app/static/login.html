@@ -81,7 +81,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 <div class="field">
 <label>NEW PASSWORD</label>
-<input type="password" id="resetNewPass" placeholder="Min 3 characters">
+<input type="password" id="resetNewPass" placeholder="Min 8 characters">
 </div>
 <button class="btn btn-primary" id="resetBtn" style="font-size:10px;padding:10px">RESET PASSWORD</button>
 <div class="error" id="resetError"></div>
@@ -97,7 +97,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 <div class="field">
 <label>CHOOSE PASSWORD</label>
-<input type="password" id="signupPass" autocomplete="new-password" placeholder="Min 3 characters">
+<input type="password" id="signupPass" autocomplete="new-password" placeholder="Min 8 characters">
 </div>
 <button class="btn btn-suc" id="signupBtn">CREATE ACCOUNT</button>
 <div class="error" id="signupError"></div>
@@ -141,12 +141,13 @@ document.getElementById('signupBtn').onclick=function(){
   const u=document.getElementById('signupUser').value.trim(),p=document.getElementById('signupPass').value;
   if(!u){document.getElementById('signupError').textContent='Enter a username';return}
   if(u.length<2){document.getElementById('signupError').textContent='Username too short';return}
-  if(!p||p.length<3){document.getElementById('signupError').textContent='Password must be at least 3 characters';return}
+  if(!p||p.length<8){document.getElementById('signupError').textContent='Password must be at least 8 characters';return}
+  if(new TextEncoder().encode(p).length>72){document.getElementById('signupError').textContent='Password too long (max 72 bytes — try a shorter passphrase)';return}
   const err=document.getElementById('signupError'),suc=document.getElementById('signupSuccess'),loader=document.getElementById('signupLoader'),btn=this;
   err.textContent='';suc.textContent='';btn.style.display='none';loader.style.display='block';
   fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:u,password:p})})
   .then(r=>{if(!r.ok){if(r.status===409)throw new Error('Username taken');throw new Error('Signup failed');}return r.json()})
-  .then(d=>{if(!d.token)throw new Error('Signup failed – no token');['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');window.location.href='/'})
+  .then(d=>{if(!d.token)throw new Error('Signup failed – no token');const wasGuest=localStorage.getItem('zone_guest')==='1';let guestPayload=null;if(wasGuest){guestPayload={};['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k=>{try{const v=localStorage.getItem('zg:'+k);if(v)guestPayload[k]=JSON.parse(v)}catch{}})}['zu:','zg:','zone:'].forEach(p=>{['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k=>{try{localStorage.removeItem(p+k)}catch{}})});localStorage.removeItem('zone_guest');localStorage.setItem('zone_user','1');if(guestPayload&&Object.keys(guestPayload).length){const keys=Object.keys(guestPayload);const pushAll=keys.reduce((chain,k)=>chain.then(()=>fetch('/api/user-data',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({key:k,value:guestPayload[k]})})),Promise.resolve());return pushAll.then(()=>window.location.href='/').catch(()=>window.location.href='/')}window.location.href='/'})
   .catch(e=>{err.textContent=e.message||'Signup failed';btn.style.display='';loader.style.display='none'})
 };
 
@@ -171,11 +172,12 @@ document.getElementById('resetBtn').onclick=function(){
   const u=document.getElementById('resetUser').value.trim(),ap=document.getElementById('resetAdminPass').value,np=document.getElementById('resetNewPass').value;
   const err=document.getElementById('resetError'),suc=document.getElementById('resetSuccess'),loader=document.getElementById('resetLoader'),btn=this;
   if(!u||!ap||!np){err.textContent='Fill all fields';return}
-  if(np.length<3){err.textContent='New password too short';return}
+  if(np.length<8){err.textContent='New password too short (minimum 8 characters)';return}
+  if(new TextEncoder().encode(np).length>72){err.textContent='Password too long (max 72 bytes — try a shorter passphrase)';return}
   err.textContent='';suc.textContent='';btn.style.display='none';loader.style.display='block';
   fetch('/api/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,admin_password:ap,new_password:np})})
   .then(r=>{if(!r.ok)return r.json().then(e=>{throw new Error(e.detail||'Reset failed')});return r.json()})
-  .then(d=>{suc.textContent=d.message;btn.style.display='';loader.style.display='none';document.getElementById('loginUser').value=u;document.getElementById('forgotLink').textContent='Forgot password?';document.getElementById('forgotPanel').style.display='none'})
+  .then(d=>{suc.textContent=d.message;btn.style.display='';loader.style.display='none';document.getElementById('resetAdminPass').value='';document.getElementById('resetNewPass').value='';document.getElementById('resetUser').value='';document.getElementById('loginUser').value=u;document.getElementById('forgotLink').textContent='Forgot password?';document.getElementById('forgotPanel').style.display='none'})
   .catch(e=>{err.textContent=e.message||'Reset failed';btn.style.display='';loader.style.display='none'})
 };
 
