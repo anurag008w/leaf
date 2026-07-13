@@ -3713,27 +3713,33 @@ const ZoneApp = (() => {
       const data = await fetchJSON('/api/timer/state');
       if (!data || !data.session) return;
       const serverSession = data.session;
+
+      // 1. Apply desktop control actions (pause/start/stop/skip)
       const lc = serverSession.lastControl;
       if (lc && lc.ts > _lastSeenControlTs) {
         _lastSeenControlTs = lc.ts;
         _applyServerControl(lc.action, serverSession);
       }
-      // Also sync running state if server shows timer running but we don't
+
+      // 2. Always reconcile running state with server
       const zs = getCurrentZs();
       const sZs = (serverSession.byZone || {})[String(state.currentZoneIdx)];
       if (sZs && zs) {
-        if (sZs.running && !zs.running && zs.remaining > 0) {
-          // Desktop started the timer — resume locally
+        // If server says running but browser isn't — start the interval
+        if (sZs.running && !state.timerHandle && zs.remaining > 0) {
           zs.running = true;
           zs.lastTick = Date.now();
-          stopTimer();
           state.timerHandle = setInterval(timerTick, 1000);
+          renderControls();
+          renderSidebar();
           updateTimerDisplay();
-        } else if (!sZs.running && zs.running) {
-          // Desktop paused — pause locally
+        }
+        // If server says not running but browser is — stop it
+        else if (!sZs.running && zs.running) {
           zs.running = false;
           stopTimer();
           renderControls();
+          renderSidebar();
           updateTimerDisplay();
         }
       }
@@ -3742,26 +3748,38 @@ const ZoneApp = (() => {
 
   function _applyServerControl(action, serverSession) {
     const zs = getCurrentZs();
-    if (action === 'pause' && zs) {
+    const sZs = (serverSession.byZone || {})[String(state.currentZoneIdx)];
+    if (!zs || !sZs) return;
+
+    if (action === 'pause') {
       zs.running = false;
       stopTimer();
       renderControls();
       renderSidebar();
-    } else if (action === 'stop' && zs) {
+    } else if (action === 'stop') {
       zs.running = false;
       stopTimer();
-      zs.remaining = zs.total || 25 * 60;
+      zs.remaining = sZs.total || zs.total || 25 * 60;
+      zs.total = sZs.total || zs.total || 25 * 60;
       zs.elapsed = 0;
       zs.zoneElapsed = 0;
       zs.blockComplete = false;
       zs.overtimeSeconds = 0;
       renderAll();
-    } else if (action === 'skip' && zs) {
+    } else if (action === 'skip') {
+      // Apply server state directly instead of calling timerSkip (avoids double-logging)
       zs.running = false;
       stopTimer();
-      timerSkip();
-    } else if (action === 'start' && zs) {
-      if (!zs.running && zs.remaining > 0) {
+      zs.blockType = sZs.blockType;
+      zs.remaining = sZs.remaining;
+      zs.total = sZs.total;
+      zs.cycle = sZs.cycle;
+      zs.elapsed = 0;
+      zs.blockComplete = false;
+      zs.overtimeSeconds = 0;
+      renderAll();
+    } else if (action === 'start') {
+      if (!state.timerHandle && zs.remaining > 0) {
         zs.running = true;
         zs.lastTick = Date.now();
         state.timerHandle = setInterval(timerTick, 1000);
