@@ -668,8 +668,8 @@ async def save_user_data(body: UserDataBody, request: Request):
     if len(raw) > 5 * 1024 * 1024:
         raise HTTPException(413, "data too large (max 5 MB)")
     # When browser saves session, protect desktop overlay controls.
-    # If lastControl was recent, ensure browser can't overwrite
-    # the running state that the desktop just set.
+    # If lastControl was recent (<10s), the browser's stale save would
+    # overwrite the state change the desktop just made.
     if body.key == "session" and isinstance(body.value, dict):
         existing = _read_json(user_dir(uname) / "session.json")
         lc = existing.get("lastControl")
@@ -677,20 +677,24 @@ async def save_user_data(body: UserDataBody, request: Request):
             lc_ts = lc.get("ts", 0)
             age = time.time() - lc_ts
             if age < 10:
-                # Desktop recently controlled timer — apply control intent
                 action = lc.get("action", "")
                 body.value["lastControl"] = lc
-                idx = body.value.get("currentZoneIdx", 0)
-                bz = body.value.get("byZone", {})
-                zs = bz.get(str(idx))
-                if zs:
-                    if action in ("pause", "stop"):
-                        zs["running"] = False
-                    elif action == "start":
+                # For any recent desktop control, preserve the full
+                # zone state from the server (blockType, remaining, etc.)
+                # — only let browser update non-timer fields.
+                idx = existing.get("currentZoneIdx", 0)
+                old_bz = existing.get("byZone", {})
+                new_bz = body.value.get("byZone", {})
+                if str(idx) in old_bz and str(idx) in new_bz:
+                    # Keep desktop's state for this zone
+                    new_bz[str(idx)] = old_bz[str(idx)]
+                    body.value["byZone"] = new_bz
+                if action == "start":
+                    zs = body.value.get("byZone", {}).get(str(idx))
+                    if zs:
                         zs["running"] = True
                         zs["lastTick"] = time.time() * 1000
             else:
-                # Old control — just preserve it for browser poll
                 body.value["lastControl"] = lc
     write_user_data(uname, body.key, body.value)
     return {"status": "ok"}
