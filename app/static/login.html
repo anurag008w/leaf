@@ -42,6 +42,71 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 .guest-hint{font-size:10px;color:var(--text-muted);margin-top:8px;font-family:var(--mono);opacity:.6}
 .panel{display:block}
 .panel.hide{display:none}
+
+
+/* Refined Zone OS authentication polish */
+:root {
+  --login-glass: rgba(17, 14, 28, .76);
+  --login-line: rgba(216, 180, 254, .18);
+}
+body {
+  background:
+    radial-gradient(820px 520px at 18% 0%, rgba(168,85,247,.22), transparent 58%),
+    radial-gradient(700px 500px at 92% 8%, rgba(34,211,238,.12), transparent 55%),
+    linear-gradient(135deg, #070512, #090713 52%, #020306);
+  overflow: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.020) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at 50% 12%, #000, transparent 75%);
+}
+.login-wrap { max-width: 430px; padding: 22px; position: relative; z-index: 1; }
+.login-box {
+  padding: 38px 30px 28px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.040));
+  border: 1px solid var(--login-line);
+  box-shadow: 0 28px 88px rgba(0,0,0,.52), inset 0 1px 0 rgba(255,255,255,.10);
+  backdrop-filter: blur(24px) saturate(155%);
+}
+.logo {
+  width: 70px;
+  height: 70px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #a855f7, #22d3ee);
+  box-shadow: 0 18px 44px rgba(168,85,247,.28);
+  font-size: 38px;
+}
+h1 { font-size: 38px; letter-spacing: -1.4px; margin-bottom: 6px; }
+.sub { color: #b8b4cc; margin-bottom: 24px; }
+.tab-row { padding: 5px; border-radius: 16px; background: rgba(255,255,255,.052); border: 1px solid rgba(255,255,255,.10); gap: 5px; }
+.tab-btn { border-radius: 12px; padding: 12px 10px; background: transparent; color: #9b94b3; }
+.tab-btn.active { background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; box-shadow: 0 10px 26px rgba(168,85,247,.26); }
+.field input { height: 48px; border-radius: 14px; background: rgba(255,255,255,.060); border-color: rgba(255,255,255,.12); transition: border-color .18s, box-shadow .18s, background .18s; }
+.field input:focus { border-color: #a855f7; box-shadow: 0 0 0 4px rgba(168,85,247,.14); background: rgba(255,255,255,.085); }
+.btn { min-height: 50px; border-radius: 15px; transition: transform .18s, box-shadow .18s, filter .18s; }
+.btn-primary { background: linear-gradient(135deg, #a855f7, #7c3aed); box-shadow: 0 16px 38px rgba(168,85,247,.26); }
+.btn-suc { background: linear-gradient(135deg, #34d399, #22c55e); box-shadow: 0 16px 38px rgba(52,211,153,.22); }
+.btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.btn-ghost { background: rgba(255,255,255,.042); border-color: rgba(255,255,255,.12); color: #ded9ef; }
+.sep::before, .sep::after { background: rgba(255,255,255,.12); }
+@media (max-width: 520px) {
+  body { align-items: stretch; }
+  .login-wrap { max-width: none; width: 100%; display: flex; align-items: center; padding: 14px; }
+  .login-box { width: 100%; border-radius: 24px; padding: 30px 20px; }
+  h1 { font-size: 34px; }
+}
+
 </style>
 </head>
 <body>

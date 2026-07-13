@@ -1151,6 +1151,7 @@ const ZoneApp = (() => {
           <h1 style="cursor:pointer" onclick="ZoneApp.editTitleInline()" title="Click to edit title">${esc(state.config?.identity?.goalName || 'Zone')} ✏️</h1>
         </div>
         <div class="hdr-right">
+          <button class="icon-btn command-btn" onclick="ZoneApp.openCommandPalette()" title="Command palette">⌘K COMMAND</button>
           <button class="icon-btn" onclick="ZoneApp.openOnboarding()">🎯 ${state.examTrack ? 'CHANGE TRACK' : 'SET GOAL'}</button>
           <div class="hdr-clock">
             <b class="mono" id="wallclock">--:--:--</b>
@@ -1185,6 +1186,55 @@ const ZoneApp = (() => {
         else { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
       }, 1000);
     }
+  }
+
+  function tabIcon(tab) {
+    return ({ console:'⌁', wallpapers:'◩', calendar:'◇', stats:'◌', 'exam-timer':'◎', settings:'⚙' })[tab] || '•';
+  }
+
+  function openCommandPalette() {
+    document.querySelectorAll('.command-palette-overlay').forEach(el => el.remove());
+    const commands = [
+      ['console', 'Open Console', 'Timer, zones and day progress'],
+      ['wallpapers', 'Open Wallpapers', 'Generate premium study wallpapers'],
+      ['calendar', 'Open Calendar', 'Events, holidays and schedule'],
+      ['stats', 'Open Stats', 'Analytics, charts and activity'],
+      ['exam-timer', 'Open Exam Timer', 'Countdown cards and dates'],
+      ['settings', 'Open Settings', 'Themes, editor and data']
+    ];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay command-palette-overlay';
+    overlay.innerHTML = `<div class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="cp-top">
+        <span class="cp-orb">⌘</span>
+        <input id="cpInput" placeholder="Search commands, screens, actions…" autocomplete="off">
+        <span class="cp-hint">ESC</span>
+      </div>
+      <div class="cp-list">
+        ${commands.map(([tab, title, desc]) => `<button class="cp-item" data-tab="${tab}" onclick="ZoneApp.switchTab('${tab}');this.closest('.command-palette-overlay').remove()">
+          <span class="cp-icon">${tabIcon(tab)}</span>
+          <span><b>${title}</b><small>${desc}</small></span>
+          <span class="cp-enter">↵</span>
+        </button>`).join('')}
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#cpInput');
+    const items = [...overlay.querySelectorAll('.cp-item')];
+    input?.focus();
+    input?.addEventListener('input', () => {
+      const q = input.value.toLowerCase().trim();
+      items.forEach(item => {
+        item.style.display = item.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+    input?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const first = items.find(item => item.style.display !== 'none');
+        first?.click();
+      }
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   }
 
   function renderTabBody() {
@@ -4011,6 +4061,11 @@ const ZoneApp = (() => {
       }
     });
     document.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        openCommandPalette();
+        return;
+      }
       if (e.key === 'Escape') {
         const modals = document.querySelectorAll('.modal-overlay');
         if (modals.length) modals[modals.length - 1].remove();
@@ -4054,7 +4109,8 @@ const ZoneApp = (() => {
     refreshCharts, scrollToChart, showDayDetail,
     openExamDateEditor, saveExamDates,
     applyTheme, setTheme,
-    takeBreak, setSetting, applyPreset
+    takeBreak, setSetting, applyPreset,
+    openCommandPalette
   };
 })();
 
