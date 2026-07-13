@@ -3703,6 +3703,75 @@ const ZoneApp = (() => {
     }).catch(() => toast('Could not render wallpaper', 'error'));
   }
 
+  // ─── Server timer sync (desktop overlay) ─────
+  let _lastSeenControlTs = 0;
+  let _serverPollHandle = null;
+
+  async function _pollTimerState() {
+    if (isGuest()) return;
+    try {
+      const data = await fetchJSON('/api/timer/state');
+      if (!data || !data.session) return;
+      const serverSession = data.session;
+      const lc = serverSession.lastControl;
+      if (lc && lc.ts > _lastSeenControlTs) {
+        _lastSeenControlTs = lc.ts;
+        _applyServerControl(lc.action, serverSession);
+      }
+      // Also sync running state if server shows timer running but we don't
+      const zs = getCurrentZs();
+      const sZs = (serverSession.byZone || {})[String(state.currentZoneIdx)];
+      if (sZs && zs) {
+        if (sZs.running && !zs.running && zs.remaining > 0) {
+          // Desktop started the timer — resume locally
+          zs.running = true;
+          zs.lastTick = Date.now();
+          stopTimer();
+          state.timerHandle = setInterval(timerTick, 1000);
+          updateTimerDisplay();
+        } else if (!sZs.running && zs.running) {
+          // Desktop paused — pause locally
+          zs.running = false;
+          stopTimer();
+          renderControls();
+          updateTimerDisplay();
+        }
+      }
+    } catch {}
+  }
+
+  function _applyServerControl(action, serverSession) {
+    const zs = getCurrentZs();
+    if (action === 'pause' && zs) {
+      zs.running = false;
+      stopTimer();
+      renderControls();
+      renderSidebar();
+    } else if (action === 'stop' && zs) {
+      zs.running = false;
+      stopTimer();
+      zs.remaining = zs.total || 25 * 60;
+      zs.elapsed = 0;
+      zs.zoneElapsed = 0;
+      zs.blockComplete = false;
+      zs.overtimeSeconds = 0;
+      renderAll();
+    } else if (action === 'skip' && zs) {
+      zs.running = false;
+      stopTimer();
+      timerSkip();
+    } else if (action === 'start' && zs) {
+      if (!zs.running && zs.remaining > 0) {
+        zs.running = true;
+        zs.lastTick = Date.now();
+        state.timerHandle = setInterval(timerTick, 1000);
+        renderControls();
+        renderSidebar();
+        updateTimerDisplay();
+      }
+    }
+  }
+
   // ─── INIT ────────────────────────────────────
   async function init() {
     $root = document.getElementById('app-root');
@@ -3940,6 +4009,8 @@ const ZoneApp = (() => {
     });
     setInterval(saveState, 5000);
     setInterval(tickClock, 1000);
+    // Poll server for timer control from desktop overlay
+    if (!isGuest()) _serverPollHandle = setInterval(_pollTimerState, 3000);
   }
 
   return {

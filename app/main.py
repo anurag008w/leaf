@@ -727,6 +727,91 @@ TRACKS = [
 async def get_exam_tracks():
     return {"tracks": TRACKS}
 
+# ── Timer sync API (desktop overlay) ──────────────
+class TimerControlBody(BaseModel):
+    action: str  # "start", "pause", "skip", "stop"
+
+@app.get("/api/timer/state")
+async def get_timer_state(request: Request):
+    """Lightweight timer state for desktop overlay + cross-device sync."""
+    uname = getattr(request.state, "username", None)
+    if not uname:
+        return {"guest": True}
+    data = read_user_data(uname)
+    session = data.get("session", {})
+    config = _read_json(user_dir(uname) / "config.json") or load_config()
+    # Extract zone titles for display
+    zones = []
+    for z in config.get("zones", []):
+        zones.append({
+            "title": z.get("title", "Zone"),
+            "focusDuration": z.get("focusDuration", 25),
+            "breakDurations": z.get("breakDurations", []),
+        })
+    return {
+        "session": session,
+        "zones": zones,
+    }
+
+@app.post("/api/timer/control")
+async def timer_control(body: TimerControlBody, request: Request):
+    """Remote timer control from desktop overlay."""
+    uname = getattr(request.state, "username", None)
+    if not uname:
+        return {"status": "ok", "guest": True}
+    if body.action not in ("start", "pause", "skip", "stop"):
+        raise HTTPException(400, "invalid action")
+
+    data = read_user_data(uname)
+    session = data.get("session", {})
+    by_zone = session.get("byZone", {})
+    idx = session.get("currentZoneIdx", 0)
+    zs = by_zone.get(str(idx))
+
+    now = time.time()
+    session["lastControl"] = {"action": body.action, "ts": now}
+
+    if zs:
+        if body.action == "start":
+            zs["running"] = True
+            zs["lastTick"] = now * 1000
+        elif body.action == "pause":
+            zs["running"] = False
+        elif body.action == "stop":
+            zs["running"] = False
+            zs["remaining"] = zs.get("total", 25 * 60)
+            zs["elapsed"] = 0
+            zs["zoneElapsed"] = 0
+            zs["blockComplete"] = False
+            zs["overtimeSeconds"] = 0
+        elif body.action == "skip":
+            zs["running"] = False
+            # If in overtime, log it
+            if zs.get("blockComplete") and zs.get("overtimeSeconds", 0) > 0:
+                zs["overtimeSeconds"] = 0
+            if zs.get("blockType") == "focus":
+                zs["blockType"] = "break"
+                zs["remaining"] = 5 * 60
+                zs["total"] = 5 * 60
+            else:
+                zs["cycle"] = zs.get("cycle", 0) + 1
+                zs["blockType"] = "focus"
+                # Reset to focus duration from config
+                config = _read_json(user_dir(uname) / "config.json") or load_config()
+                zones_cfg = config.get("zones", [])
+                z_cfg = zones_cfg[idx] if idx < len(zones_cfg) else {}
+                dur = (z_cfg.get("focusDuration", 25)) * 60
+                zs["remaining"] = dur
+                zs["total"] = dur
+            zs["elapsed"] = 0
+            zs["blockComplete"] = False
+            zs["overtimeSeconds"] = 0
+            zs["lastTick"] = now * 1000
+
+    write_user_data(uname, "session", session)
+    log.info("timer control from desktop: %s by %s", body.action, uname)
+    return {"status": "ok", "session": session}
+
 # ── Backup / sync ─────────────────────────────────
 @app.post("/api/sync/trigger")
 async def sync_trigger(request: Request):
