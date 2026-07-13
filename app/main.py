@@ -667,6 +667,21 @@ async def save_user_data(body: UserDataBody, request: Request):
     raw = json.dumps(body.value)
     if len(raw) > 5 * 1024 * 1024:
         raise HTTPException(413, "data too large (max 5 MB)")
+    # When browser saves session, protect desktop overlay controls.
+    # If a desktop control happened <15s ago, the browser's stale save
+    # would overwrite it. Preserve the server-side session instead.
+    if body.key == "session" and isinstance(body.value, dict):
+        existing = _read_json(user_dir(uname) / "session.json")
+        lc = existing.get("lastControl")
+        if lc and isinstance(lc, dict):
+            lc_ts = lc.get("ts", 0)
+            if time.time() - lc_ts < 15:
+                # Desktop recently controlled timer — don't let browser overwrite
+                log.info("skipping browser session save (desktop control pending, %.1fs ago)", time.time() - lc_ts)
+                return {"status": "ok", "skipped": True}
+        # No pending control — preserve lastControl for browser poll
+        if existing.get("lastControl"):
+            body.value["lastControl"] = existing["lastControl"]
     write_user_data(uname, body.key, body.value)
     return {"status": "ok"}
 
