@@ -412,7 +412,7 @@ async def auth_middleware(request: Request, call_next):
 
     resp = await call_next(request)
     ct = resp.headers.get("content-type", "")
-    if "text/html" in ct:
+    if "text/html" in ct or "javascript" in ct or "text/css" in ct:
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return resp
 
