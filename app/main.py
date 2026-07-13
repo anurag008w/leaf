@@ -667,13 +667,31 @@ async def save_user_data(body: UserDataBody, request: Request):
     raw = json.dumps(body.value)
     if len(raw) > 5 * 1024 * 1024:
         raise HTTPException(413, "data too large (max 5 MB)")
-    # When browser saves session, preserve lastControl from desktop overlay
-    # so the frontend poll can detect desktop commands.
+    # When browser saves session, protect desktop overlay controls.
+    # If lastControl was recent, ensure browser can't overwrite
+    # the running state that the desktop just set.
     if body.key == "session" and isinstance(body.value, dict):
         existing = _read_json(user_dir(uname) / "session.json")
         lc = existing.get("lastControl")
         if lc and isinstance(lc, dict):
-            body.value["lastControl"] = lc
+            lc_ts = lc.get("ts", 0)
+            age = time.time() - lc_ts
+            if age < 10:
+                # Desktop recently controlled timer — apply control intent
+                action = lc.get("action", "")
+                body.value["lastControl"] = lc
+                idx = body.value.get("currentZoneIdx", 0)
+                bz = body.value.get("byZone", {})
+                zs = bz.get(str(idx))
+                if zs:
+                    if action in ("pause", "stop"):
+                        zs["running"] = False
+                    elif action == "start":
+                        zs["running"] = True
+                        zs["lastTick"] = time.time() * 1000
+            else:
+                # Old control — just preserve it for browser poll
+                body.value["lastControl"] = lc
     write_user_data(uname, body.key, body.value)
     return {"status": "ok"}
 
