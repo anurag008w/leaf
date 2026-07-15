@@ -2602,9 +2602,6 @@ const ZoneApp = (() => {
           <h2>⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
           <button class="ctl" onclick="ZoneApp.openExamDateEditor()" style="padding:6px 14px;font-size:11px">✏️ Edit Dates</button>
         </div>
-        <div class="exam-cd-toggle">
-          ${modes.map(m => `<button class="exam-cd-btn ${state.examCountdownMode === m.key ? 'active' : ''}" onclick="ZoneApp.setCountdownMode('${m.key}')">${m.label}</button>`).join('')}
-        </div>
         <div class="exam-grid" id="examGrid">
           ${exams.map((e, i) => {
             const target = new Date(e.date + 'T23:59:59').getTime();
@@ -2798,6 +2795,19 @@ const ZoneApp = (() => {
                 <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
               </div>
             </div>`).join('')}
+          </div>
+          <div class="settings-card">
+            <div class="field-label" style="margin-bottom:14px">Exam Countdown Display</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Choose how the countdown shows on each exam card</div>
+            <div class="exam-cd-toggle" style="margin:0">
+              ${[
+                { key:'full', label:'DD:HH:MM:SS' },
+                { key:'days', label:'Days' },
+                { key:'hours', label:'Hours' },
+                { key:'mins', label:'Mins' },
+                { key:'secs', label:'Secs' }
+              ].map(m => `<button class="exam-cd-btn ${state.examCountdownMode === m.key ? 'active' : ''}" onclick="ZoneApp.setCountdownMode('${m.key}')">${m.label}</button>`).join('')}
+            </div>
           </div>
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Timer Preset</div>
@@ -4106,6 +4116,7 @@ const ZoneApp = (() => {
     toggleSidebar, toggleFullscreen,
     refreshCharts, scrollToChart, showDayDetail,
     openExamDateEditor, saveExamDates,
+    setCountdownMode,
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset
   };
