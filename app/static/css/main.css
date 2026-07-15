@@ -1072,6 +1072,33 @@ input[type=color] { width: 44px; height: 36px; border: 1px solid var(--line); bo
   color: var(--text-primary); line-height: 1; z-index: 1;
 }
 .cal-cell.today .cal-num { text-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+.cal-cell.selected {
+  background: rgba(56,189,248,0.15); border: 2px solid var(--accent-lecture);
+  box-shadow: 0 0 12px rgba(56,189,248,0.2);
+}
+.cal-cell.selected .cal-num { color: var(--accent-lecture); font-weight: 700; }
+.cal-cell.selected.today { background: linear-gradient(135deg, var(--accent-lecture), #2563eb); border-color: transparent; }
+.cal-cell.selected.today .cal-num { color: #fff; }
+/* ── Time travel banner ── */
+.time-travel-banner {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(56,189,248,0.12), rgba(167,139,250,0.12));
+  border: 1px solid rgba(56,189,248,0.25); border-radius: 10px;
+  margin: 0 16px 8px; font-size: 12px; color: var(--text-secondary);
+}
+.tt-icon { font-size: 18px; }
+.tt-text { flex: 1; }
+.tt-text b { color: var(--accent-lecture); font-family: var(--mono); }
+.tt-back {
+  padding: 5px 14px; border-radius: 8px; border: 1px solid var(--accent-lecture);
+  background: transparent; color: var(--accent-lecture); font-size: 11px;
+  font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: var(--mono);
+}
+.tt-back:hover { background: var(--accent-lecture); color: #fff; }
+.tt-date-badge {
+  font-size: 11px; background: rgba(56,189,248,0.15); color: var(--accent-lecture);
+  padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(56,189,248,0.3);
+}
 .cal-dot-count {
   position: absolute; top: 2px; right: 2px;
   background: var(--accent-solve); color: #0A0D13;

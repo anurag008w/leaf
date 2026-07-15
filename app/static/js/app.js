@@ -21,7 +21,8 @@ const ZoneApp = (() => {
     examDates: [],
     wpStyle: 'mission_control', wpSize: 'mobile',
     audioCtx: null, timerHandle: null, notifAsked: false,
-    examCountdownMode: 'full' // full | days | hours | mins | secs
+    examCountdownMode: 'full', // full | days | hours | mins | secs
+    selectedDate: null // time travel: null = real today, 'YYYY-MM-DD' = selected
   };
 
   let $root, $toastContainer;
@@ -69,7 +70,8 @@ const ZoneApp = (() => {
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   }
-  function todayKey() { return localDateKey(); }
+  function todayKey() { return state.selectedDate || localDateKey(); }
+  function realTodayKey() { return localDateKey(); }
 
   let defaultEventsCache = null;
   let defaultEventsYear = null;
@@ -960,6 +962,7 @@ const ZoneApp = (() => {
   }
 
   function markZoneComplete(idx) {
+    if (state.selectedDate) { toast('⏳ Exit time travel mode to mark zones', 'warn'); return; }
     const z = getZone(idx);
     const zs = state.byZone[idx];
 
@@ -1155,7 +1158,7 @@ const ZoneApp = (() => {
           <button class="icon-btn" onclick="ZoneApp.openOnboarding()">🎯 ${state.examTrack ? 'CHANGE TRACK' : 'SET GOAL'}</button>
           <div class="hdr-clock">
             <b class="mono" id="wallclock">--:--:--</b>
-            ${state.config?.identity?.examTrack || 'Ready'}
+            ${state.selectedDate ? `<span class="mono tt-date-badge">${esc(state.selectedDate)}</span>` : (state.config?.identity?.examTrack || 'Ready')}
           </div>
         </div>
       </header>
@@ -1168,6 +1171,13 @@ const ZoneApp = (() => {
         <button class="tab-btn ${state.tab === 'exam-timer' ? 'active' : ''}" onclick="ZoneApp.switchTab('exam-timer')">EXAM TIMER</button>
         <button class="tab-btn ${state.tab === 'settings' ? 'active' : ''}" onclick="ZoneApp.switchTab('settings')">SETTINGS</button>
       </div>
+
+      ${state.selectedDate ? `
+      <div class="time-travel-banner">
+        <span class="tt-icon">⏰</span>
+        <span class="tt-text">Viewing <b>${esc(state.selectedDate)}</b> — all data shown for this date</span>
+        <button class="tt-back" onclick="ZoneApp.clearTimeTravel()">← Back to Today</button>
+      </div>` : ''}
 
       <div id="tabBody"></div>
       <footer>ZONE · study execution system · v4</footer>`;
@@ -1545,6 +1555,7 @@ const ZoneApp = (() => {
   }
 
   function timerToggle() {
+    if (state.selectedDate) { toast('⏳ Timer paused — exit time travel mode first', 'warn'); return; }
     const zs = getCurrentZs();
     if (zs?.running) timerPause();
     else timerStart();
@@ -1794,14 +1805,19 @@ const ZoneApp = (() => {
       const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const dayEvents = allMergedEvents.filter(e => e.date === dateStr);
       const nEvents = dayEvents.length;
-      cells += `<div class="cal-cell ${isToday ? 'today' : ''}" onclick="ZoneApp.showDayMenu('${dateStr}')" title="${nEvents} event${nEvents !== 1 ? 's' : ''}">
+      const isSelected = dateStr === state.selectedDate;
+      cells += `<div class="cal-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" onclick="ZoneApp.setCalDate('${dateStr}')" title="${nEvents} event${nEvents !== 1 ? 's' : ''}">
         <span class="cal-num">${d}</span>
         ${nEvents > 0 ? `<span class="cal-dot-count">${nEvents > 9 ? '9+' : nEvents}</span>` : ''}
         ${nEvents > 0 ? `<div class="cal-dots">${dayEvents.slice(0, 3).map(e => `<span style="background:${e.color}"></span>`).join('')}</div>` : ''}
       </div>`;
     }
 
-    const todayEvents = allMergedEvents.filter(e => e.date === todayKey());
+    const activeDate = state.selectedDate || todayKey();
+    const todayEvents = allMergedEvents.filter(e => e.date === activeDate);
+    const dateLabel = state.selectedDate
+      ? new Date(state.selectedDate + 'T00:00:00').toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+      : 'Today';
 
     body.innerHTML = `
       <div class="cal-wrap" style="display:flex;flex-direction:column;gap:16px;padding:8px 0;">
@@ -1829,8 +1845,8 @@ const ZoneApp = (() => {
 
         <div class="cal-events-panel">
           <div class="cal-events-header">
-            <span>Today's Events</span>
-            <button class="cal-add-btn" onclick="ZoneApp.showAddEvent()">+ ADD</button>
+            <span>📅 ${dateLabel}</span>
+            <button class="cal-add-btn" onclick="ZoneApp.showAddEvent('${state.selectedDate || todayKey()}')">+ ADD</button>
           </div>
           <div id="calTodayEvents">
             ${todayEvents.length === 0
@@ -1850,7 +1866,15 @@ const ZoneApp = (() => {
 
   function calPrev() { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendarTab(); }
   function calNext() { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendarTab(); }
-  function calToday() { calMonth = new Date().getMonth(); calYear = new Date().getFullYear(); renderCalendarTab(); }
+  function calToday() { state.selectedDate = null; calMonth = new Date().getMonth(); calYear = new Date().getFullYear(); render(); }
+  function setCalDate(dateStr) {
+    state.selectedDate = dateStr;
+    const d = new Date(dateStr + 'T00:00:00');
+    calMonth = d.getMonth();
+    calYear = d.getFullYear();
+    render();
+  }
+  function clearTimeTravel() { state.selectedDate = null; render(); }
 
   function showDayMenu(dateStr) {
     const dayEvents = getMergedEvents().filter(e => e.date === dateStr);
@@ -4104,7 +4128,7 @@ const ZoneApp = (() => {
     openOnboarding, selectExamTrack, confirmExamTrack, closeModal, skipOnboarding,
     showAddEvent, saveEvent, deleteEvent,
     showEditEvent, updateEvent,
-    calPrev, calNext, calToday, showDayMenu,
+    calPrev, calNext, calToday, showDayMenu, setCalDate, clearTimeTravel,
     closeAndAddEvent, closeAndEditEvent,
     exportEvents, importEvents, exportConfig, importConfig,
     toggleSetting, clearStats, resetAll, logout,
