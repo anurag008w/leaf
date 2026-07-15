@@ -521,10 +521,12 @@ const ZoneApp = (() => {
     saveState();
   }
 
-  function getTrackingStats() {
+  function getTrackingStats(cutoffDate) {
     const log = state.tracking.log;
     const today = todayKey();
-    const todayEvents = log.filter(e => e.date === today);
+    // If time travel is active, filter log to only include dates <= cutoff
+    const filteredLog = cutoffDate ? log.filter(e => e.date <= cutoffDate) : log;
+    const todayEvents = filteredLog.filter(e => e.date === today);
     const zones = getZones();
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
 
@@ -542,11 +544,11 @@ const ZoneApp = (() => {
       + todayEvents.filter(e => e.type === 'overtime')
         .reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
     const archivedDaily = state.tracking.archivedDaily || {};
-    const totalSessions = log.filter(e => e.type === 'session_complete').length
-      + Object.values(archivedDaily).reduce((s, d) => s + (d.sessions || 0), 0);
+    const totalSessions = filteredLog.filter(e => e.type === 'session_complete').length
+      + Object.entries(archivedDaily).filter(([d]) => !cutoffDate || d <= cutoffDate).reduce((s, [, d]) => s + (d.sessions || 0), 0);
 
     const dailyMap = {};
-    log.forEach(e => {
+    filteredLog.forEach(e => {
       const date = e.date;
       if (!dailyMap[date]) dailyMap[date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
       if (e.type === 'session_complete') {
@@ -557,7 +559,7 @@ const ZoneApp = (() => {
       }
       if (e.type === 'zone_complete') {
         // Only count as manual if this zone had NO timer sessions this day
-        const hadTimer = log.some(ev => ev.date === date && ev.type === 'session_complete' && ev.zoneIdx === e.zoneIdx);
+        const hadTimer = filteredLog.some(ev => ev.date === date && ev.type === 'session_complete' && ev.zoneIdx === e.zoneIdx);
         if (!hadTimer) {
           const d = zoneLookup(e.zoneIdx).focusDuration || 25;
           dailyMap[date].focusMin += d;
@@ -582,6 +584,7 @@ const ZoneApp = (() => {
     // than anything left in `log` (archiveOldEvents never splits a day
     // across the boundary), so there's no overlap/double-count risk.
     Object.keys(archivedDaily).forEach(date => {
+      if (cutoffDate && date > cutoffDate) return;
       if (!dailyMap[date]) {
         const a = archivedDaily[date];
         dailyMap[date] = { focusMin: a.focusMin, timerMin: a.focusMin, sessions: a.sessions, manualDone: a.manualDone, skips: a.skips, events: [], archived: true };
@@ -593,6 +596,8 @@ const ZoneApp = (() => {
     let streak = 0;
     const dates = Object.keys(dailyMap).sort().reverse();
     for (let i = 0; i < dates.length; i++) {
+      // In time travel mode, only count streak up to selected date
+      if (cutoffDate && dates[i] > cutoffDate) continue;
       const dMin = dailyMap[dates[i]]?.focusMin || 0;
       if (dMin < 30) {
         // BUG FIX: `dailyMap` gets an entry for ANY logged event (session_start,
@@ -610,15 +615,31 @@ const ZoneApp = (() => {
       streak++;
     }
 
-    const zoneStats = state.tracking.zoneStats || {};
-    const zoneData = zones.map((z, i) => ({
-      ...z, idx: i,
-      ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
-    }));
+    // Compute zone data — when in time travel, derive from filtered log only
+    let zoneData;
+    if (cutoffDate) {
+      zoneData = zones.map((z, i) => {
+        const zoneEvents = filteredLog.filter(e => e.zoneIdx === i);
+        const sessions = zoneEvents.filter(e => e.type === 'session_complete').length;
+        const skips = zoneEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+        const pauses = zoneEvents.filter(e => e.type === 'pause').length;
+        const totalMin = zoneEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+        const completes = zoneEvents.filter(e => e.type === 'zone_complete' && zonesWithTimerToday.has(i)).length;
+        const doneNoTimer = zoneEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
+        return { ...z, idx: i, sessions, skips, pauses, totalMin, completes, doneNoTimer };
+      });
+    } else {
+      const zoneStats = state.tracking.zoneStats || {};
+      zoneData = zones.map((z, i) => ({
+        ...z, idx: i,
+        ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
+      }));
+    }
 
     // Merge daily zone completion snapshots into dailyMap
     const dz = state.tracking.dailyZones || {};
     Object.keys(dz).forEach(date => {
+      if (cutoffDate && date > cutoffDate) return;
       if (!dailyMap[date]) dailyMap[date] = { focusMin: 0, timerMin: 0, sessions: 0, manualDone: 0, skips: 0, events: [] };
       dailyMap[date].zoneCompleted = dz[date].completed;
       dailyMap[date].dayComplete = dz[date].dayComplete;
@@ -1413,31 +1434,39 @@ const ZoneApp = (() => {
     const stops = events.filter(e => e.type === 'stop').length;
     const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
 
-    const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
 
-    // Zone completion for this date
+    // Zone rows for sidebar
     const dz = (state.tracking.dailyZones || {})[date];
-    const zoneRows = zones.map((z, i) => {
-      let status = 'No activity', icon = '—', cls = '';
-      if (dz && dz.completed[i]) { status = 'Done'; icon = '🏁'; cls = 'done'; }
-      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i && zonesWithTimer.has(i))) { status = 'Done (timer)'; icon = '✓'; cls = 'done'; }
-      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)) { status = 'Done (manual)'; icon = '✓'; cls = 'manual'; }
-      else if (events.some(e => (e.type === 'skip_zone' || e.type === 'skip_block') && e.zoneIdx === i)) { status = 'Skipped'; icon = '⏭'; cls = 'skip'; }
+    const sidebarHtml = zones.map((z, i) => {
+      let status = '', dotClass = '';
+      if (dz && dz.completed[i]) { status = 'Done'; dotClass = 'done'; }
+      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i && zonesWithTimer.has(i))) { status = 'Done'; dotClass = 'done'; }
+      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)) { status = 'Done (manual)'; dotClass = 'done'; }
+      else if (events.some(e => (e.type === 'skip_zone' || e.type === 'skip_block') && e.zoneIdx === i)) { status = 'Skipped'; dotClass = 'skip'; }
       const dayLog = events.filter(e => e.zoneIdx === i);
       const mins = dayLog.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
-      return `<div class="dc-zone-row ${cls}">
-        <div class="dc-zi">${icon}</div>
-        <div class="dc-zb">
-          <div class="dc-zt"><span class="dc-zn">${esc(z.title)}</span><span class="dc-zm">${mins || 0}m</span></div>
-          <div class="dc-zs">${status}</div>
+      return `<button class="zone-btn" style="--zc:${z.color}">
+        <div class="zb-bar" style="background:${z.color}"></div>
+        <div class="zb-body">
+          <div class="zb-top">
+            <span class="zb-id">Z${String(z.id ?? i + 1).padStart(2,'0')}</span>
+            <span class="zb-type">${esc(z.type || 'FOCUS')}</span>
+            <span class="dot ${dotClass}"></span>
+          </div>
+          <div class="zb-name">${esc(z.title)}</div>
+          <div class="zb-bottom">
+            <span class="zb-time">${to12h(z.startTime)} — ${to12h(z.endTime)}</span>
+            <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">${mins || 0}m · ${status || 'No activity'}</span>
+          </div>
         </div>
-      </div>`;
+      </button>`;
     }).join('');
 
-    // Timeline
+    // Timeline events
     const eventIcon = { session_start:'▶', session_complete:'✓', skip_block:'⏭', pause:'⏸', skip_zone:'⏩', zone_complete:'🏁', break:'☕', stop:'⏹', overtime:'⏱' };
     const eventLbl = { session_start:'Started', session_complete:'Complete', skip_block:'Skip block', pause:'Paused', skip_zone:'Skip zone', zone_complete:'Zone done', break:'Break', stop:'Stopped', overtime:'Overtime' };
-    const timeline = events.slice(-200).reverse().map(e => `
+    const timeline = events.slice(-50).reverse().map(e => `
       <div class="dc-event">
         <span class="dc-ei" style="background:${e.type === 'session_complete' ? 'var(--accent-lecture)' : e.type === 'pause' || e.type === 'stop' ? 'var(--accent-solve)' : e.type === 'overtime' ? 'var(--accent-suc)' : 'var(--bg-3)'}">${eventIcon[e.type] || '•'}</span>
         <span class="dc-et">${e.time ? new Date(e.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '--:--'}</span>
@@ -1446,72 +1475,94 @@ const ZoneApp = (() => {
         ${e.duration ? `<span class="dc-ed">${e.duration}m</span>` : ''}${e.seconds ? `<span class="dc-ed">+${e.seconds}s</span>` : ''}
       </div>`).join('');
 
-    // Calendar events for this date
+    // Calendar events
     const calEvents = getMergedEvents().filter(e => e.date === date);
 
+    // Day progress bars
+    const totalZones = zones.length;
+    const completedZones = zones.filter((z, i) =>
+      (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)
+    ).length;
+    const pct = totalZones > 0 ? Math.round((completedZones / totalZones) * 100) : 0;
+
     body.innerHTML = `
-      <div class="dc-screen">
-        <div class="dc-glow"></div>
-        <div class="dc-hdr">
-          <div class="dc-badge glow" style="font-size:12px">TIME TRAVEL</div>
-          <div class="dc-icon-wrap">
-            <span class="dc-icon">📅</span>
-          </div>
-          <h2 class="dc-title" style="font-size:18px">${esc(dateLabel)}</h2>
-          <p class="dc-sub">Data for this date — ${archived ? 'archived summary' : events.length + ' raw events'}</p>
+      <div class="console-toolbar">
+        <div class="ct-left">
+          <span class="ct-label" style="color:var(--accent-lecture)">⏰ TIME TRAVEL · ${esc(dateLabel)}</span>
         </div>
-
-        <div class="dc-metrics">
-          <div class="dc-metric">
-            <span class="dc-metric-num" style="color:var(--accent-lecture)">${Math.round(totalFocus)}</span>
-            <span class="dc-metric-lbl">FOCUS MIN</span>
-            <span class="dc-metric-sub">Deep work</span>
-          </div>
-          <div class="dc-metric">
-            <span class="dc-metric-num">${sessions}</span>
-            <span class="dc-metric-lbl">DONE</span>
-            <span class="dc-metric-sub">${timerSessions} timer · ${manualDone} manual</span>
-          </div>
-          <div class="dc-metric">
-            <span class="dc-metric-num" style="color:var(--accent-break)">${pauses}</span>
-            <span class="dc-metric-lbl">PAUSES</span>
-            <span class="dc-metric-sub">Breaks taken</span>
-          </div>
-          <div class="dc-metric">
-            <span class="dc-metric-num" style="color:var(--accent-solve)">${skips + stops}</span>
-            <span class="dc-metric-lbl">SKIPS</span>
-            <span class="dc-metric-sub">Completion ${rate}%</span>
-          </div>
+        <div class="ct-actions">
+          <button class="ct-btn" onclick="ZoneApp.clearTimeTravel()" style="color:var(--accent-lecture);font-weight:600">← TODAY</button>
         </div>
-
-        ${zoneRows ? `
-        <div class="dc-section">
-          <div class="dc-section-title" onclick="this.nextElementSibling.classList.toggle('dc-collapse')">ZONE BREAKDOWN <span class="dc-toggle">−</span></div>
-          <div class="dc-breakdown">${zoneRows}</div>
-        </div>` : ''}
-
-        ${calEvents.length > 0 ? `
-        <div class="dc-section">
-          <div class="dc-section-title">CALENDAR EVENTS <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(${calEvents.length})</span></div>
-          <div style="display:flex;flex-direction:column;gap:6px;padding:8px 0">
-            ${calEvents.map(e => `
-              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-2);border-radius:8px;border-left:3px solid ${e.color}">
-                <span style="font-size:13px;opacity:0.6">${e.type === 'lecture' ? '📖' : e.type === 'test' ? '📝' : e.type === 'coaching' ? '🏫' : e.type === 'break' ? '☕' : e.type === 'meal' ? '🍽' : '📌'}</span>
-                <span style="flex:1;font-size:13px">${esc(e.title)}</span>
-                <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono)">${esc(e.start || '')}${e.end ? '–'+esc(e.end) : ''}</span>
-                <span style="font-size:10px;color:var(--text-muted)">${esc(e.type)}</span>
+      </div>
+      <div class="layout ${state.sidebarOpen ? '' : 'sidebar-collapsed'}">
+        <div class="sidebar">${sidebarHtml}</div>
+        <div class="panel" style="--zc:var(--accent-lecture)">
+          <div class="panel-glow"></div>
+          <div class="panel-head">
+            <div>
+              <div class="kicker mono" style="color:var(--accent-lecture)">📅 ${esc(dateLabel)}</div>
+              <h2>Day Summary</h2>
+            </div>
+            <div class="ph-right" style="display:flex;gap:12px;align-items:center">
+              <div style="text-align:right">
+                <div style="font-size:22px;font-weight:700;color:var(--accent-lecture);font-family:var(--mono)">${Math.round(totalFocus)}m</div>
+                <div style="font-size:10px;color:var(--text-muted)">FOCUS</div>
               </div>
-            `).join('')}
+            </div>
           </div>
-        </div>` : ''}
-
-        <div class="dc-section">
-          <div class="dc-section-title" onclick="this.nextElementSibling.classList.toggle('dc-collapse')">TIMELINE <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(${events.length} events)</span> <span class="dc-toggle">−</span></div>
-          <div class="dc-timeline">${archived ? '<div class="dc-empty">Archived — only summary totals available</div>' : events.length === 0 ? '<div class="dc-empty">No activity on this day</div>' : timeline}</div>
+          <div style="padding:0 20px 16px">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
+                <div style="font-size:18px;font-weight:700">${sessions}</div>
+                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">DONE</div>
+              </div>
+              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
+                <div style="font-size:18px;font-weight:700;color:var(--accent-break)">${pauses}</div>
+                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">PAUSES</div>
+              </div>
+              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
+                <div style="font-size:18px;font-weight:700;color:var(--accent-solve)">${skips + stops}</div>
+                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">SKIPS</div>
+              </div>
+              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
+                <div style="font-size:18px;font-weight:700">${rate}%</div>
+                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">RATE</div>
+              </div>
+            </div>
+            ${calEvents.length > 0 ? `
+            <div style="margin-bottom:12px">
+              <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px">CALENDAR EVENTS</div>
+              ${calEvents.map(e => `
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:4px;background:var(--bg-2);border-radius:6px;border-left:3px solid ${e.color}">
+                  <span style="flex:1;font-size:12px">${esc(e.title)}</span>
+                  <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">${esc(e.start || '')}${e.end ? '–'+esc(e.end) : ''}</span>
+                </div>`).join('')}
+            </div>` : ''}
+            <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px">TIMELINE (${events.length} events)</div>
+            <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">
+              ${archived ? '<div style="color:var(--text-muted);font-size:12px;padding:12px 0;text-align:center">Archived — only summary available</div>'
+                : events.length === 0 ? '<div style="color:var(--text-muted);font-size:12px;padding:12px 0;text-align:center">No activity on this day</div>'
+                : timeline}
+            </div>
+          </div>
         </div>
-
-        <div class="dc-actions">
-          <button class="dc-primary-btn" onclick="ZoneApp.clearTimeTravel()">← Back to Today</button>
+      </div>
+      <div class="day-progress">
+        <div class="dp-header">
+          <span class="dp-title">DAY PROGRESS</span>
+          <span class="dp-pct mono">${pct}%</span>
+        </div>
+        <div class="dp-strip">
+          ${zones.map((z, i) => {
+            const done = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
+            return `<div style="flex:1;height:100%;background:${done ? z.color : 'var(--bg-3)'};opacity:${done ? 1 : 0.3};border-radius:2px" title="${esc(z.title)}: ${done ? 'Done' : 'Pending'}"></div>`;
+          }).join('')}
+        </div>
+        <div class="dp-labels">
+          ${zones.map((z, i) => {
+            const done = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
+            return `<span style="font-size:9px;color:var(--text-muted);text-align:center;flex:1;${done ? 'color:var(--accent-solve)' : ''}">${done ? '✓' : '—'}</span>`;
+          }).join('')}
         </div>
       </div>`;
   }
@@ -2208,7 +2259,7 @@ const ZoneApp = (() => {
     const body = document.getElementById('tabBody');
     destroyCharts();
 
-    const ts = getTrackingStats();
+    const ts = getTrackingStats(state.selectedDate);
     const totalFocus = ts.totalFocusMin;
     const totalSessions = ts.totalSessions;
     const totalManual = ts.totalManual;
@@ -2229,7 +2280,7 @@ const ZoneApp = (() => {
 
     // Weekly grid
     const weeklyData = [];
-    const now = new Date();
+    const now = state.selectedDate ? new Date(state.selectedDate + 'T23:59:59') : new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
@@ -2254,19 +2305,19 @@ const ZoneApp = (() => {
         <div class="stats-grid-4">
           <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${sessionsToday}</div>
-            <div class="lbl">TODAY SESSIONS</div>
+            <div class="lbl">${state.selectedDate ? 'DATE SESSIONS' : 'TODAY SESSIONS'}</div>
           </div>
           <div class="stat-card-s">
             <div class="num">${manualToday}</div>
-            <div class="lbl">MANUAL DONE</div>
+            <div class="lbl">${state.selectedDate ? 'DATE MANUAL' : 'MANUAL DONE'}</div>
           </div>
           <div class="stat-card-s" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${focusToday}</div>
-            <div class="lbl">TODAY FOCUS</div>
+            <div class="lbl">${state.selectedDate ? 'DATE FOCUS' : 'TODAY FOCUS'}</div>
           </div>
           <div class="stat-card-s ${skipsToday > 2 ? 'warn' : ''}">
             <div class="num">${skipsToday}</div>
-            <div class="lbl">SKIPS TODAY</div>
+            <div class="lbl">${state.selectedDate ? 'DATE SKIPS' : 'SKIPS TODAY'}</div>
           </div>
         </div>
 
