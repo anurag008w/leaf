@@ -1345,9 +1345,11 @@ input[type=range]::-moz-range-track {
   background: var(--accent-lecture); color: #fff; font-weight: 600;
   box-shadow: 0 2px 8px rgba(56,189,248,0.2);
 }
-/* Single-number mode (days/hours/mins/secs) */
-.exam-unit-single { min-width: 100px; }
-.exam-num-big { font-size: 56px !important; }
+/* Highlighted unit + dim others only when a unit IS highlighted */
+.exam-unit-hl { min-width: 70px; }
+.exam-num-hl { font-size: 44px !important; color: var(--accent-lecture) !important; text-shadow: 0 0 14px rgba(56,189,248,0.35); }
+.exam-countdown:has(.exam-unit-hl) .exam-unit:not(.exam-unit-hl) { opacity: 0.4; transition: opacity 0.2s; }
+.exam-countdown:not(:has(.exam-unit-hl)) .exam-unit { opacity: 1; }
 @media (max-width: 640px) {
   .exam-grid { grid-template-columns: 1fr; }
   .exam-countdown-wrap { width: 220px; height: 190px; }

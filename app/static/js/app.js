@@ -2577,27 +2577,23 @@ const ZoneApp = (() => {
     function buildCountdownHTML(i, target, expired) {
       if (expired) return '<div class="exam-expired">🎉 Exam Date Reached</div>';
       const diff = target - now;
-      if (mode === 'full') {
-        return `
-          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
-          <span class="exam-sep">:</span>
-          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
-          <span class="exam-sep">:</span>
-          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
-          <span class="exam-sep">:</span>
-          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>`;
-      }
-      const totalMap = {
-        days: { val: Math.floor(diff / 86400000), lbl: 'DAYS' },
-        hours: { val: Math.floor(diff / 3600000), lbl: 'HOURS' },
-        mins: { val: Math.floor(diff / 60000), lbl: 'MINS' },
-        secs: { val: Math.floor(diff / 1000), lbl: 'SECS' }
-      };
-      const t = totalMap[mode];
-      return `<div class="exam-unit exam-unit-single">
-        <span class="exam-num exam-num-big" id="ecd-${i}-single">${t.val}</span>
-        <span class="exam-lbl">${t.lbl}</span>
-      </div>`;
+      // Always show DD:HH:MM:SS — highlight selected unit
+      return `
+        <div class="exam-unit ${mode === 'days' ? 'exam-unit-hl' : ''}" id="ecd-${i}-d-wrap">
+          <span class="exam-num ${mode === 'days' ? 'exam-num-hl' : ''}" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span>
+        </div>
+        <span class="exam-sep">:</span>
+        <div class="exam-unit ${mode === 'hours' ? 'exam-unit-hl' : ''}" id="ecd-${i}-h-wrap">
+          <span class="exam-num ${mode === 'hours' ? 'exam-num-hl' : ''}" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span>
+        </div>
+        <span class="exam-sep">:</span>
+        <div class="exam-unit ${mode === 'mins' ? 'exam-unit-hl' : ''}" id="ecd-${i}-m-wrap">
+          <span class="exam-num ${mode === 'mins' ? 'exam-num-hl' : ''}" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span>
+        </div>
+        <span class="exam-sep">:</span>
+        <div class="exam-unit ${mode === 'secs' ? 'exam-unit-hl' : ''}" id="ecd-${i}-s-wrap">
+          <span class="exam-num ${mode === 'secs' ? 'exam-num-hl' : ''}" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span>
+        </div>`;
     }
 
     body.innerHTML = `
@@ -2670,20 +2666,14 @@ const ZoneApp = (() => {
       const mins = Math.floor((diff % 3600000) / 60000);
       const secs = Math.floor((diff % 60000) / 1000);
 
-      if (mode === 'full') {
-        const dEl = document.getElementById('ecd-' + i + '-d');
-        const hEl = document.getElementById('ecd-' + i + '-h');
-        const mEl = document.getElementById('ecd-' + i + '-m');
-        const sEl = document.getElementById('ecd-' + i + '-s');
-        if (dEl) dEl.textContent = String(days).padStart(2, '0');
-        if (hEl) hEl.textContent = String(hours).padStart(2, '0');
-        if (mEl) mEl.textContent = String(mins).padStart(2, '0');
-        if (sEl) sEl.textContent = String(secs).padStart(2, '0');
-      } else {
-        const sEl = document.getElementById('ecd-' + i + '-single');
-        const totalMap = { days: days, hours: Math.floor(diff / 3600000), mins: Math.floor(diff / 60000), secs: Math.floor(diff / 1000) };
-        if (sEl) sEl.textContent = totalMap[mode] ?? 0;
-      }
+      const dEl = document.getElementById('ecd-' + i + '-d');
+      const hEl = document.getElementById('ecd-' + i + '-h');
+      const mEl = document.getElementById('ecd-' + i + '-m');
+      const sEl = document.getElementById('ecd-' + i + '-s');
+      if (dEl) dEl.textContent = String(days).padStart(2, '0');
+      if (hEl) hEl.textContent = String(hours).padStart(2, '0');
+      if (mEl) mEl.textContent = String(mins).padStart(2, '0');
+      if (sEl) sEl.textContent = String(secs).padStart(2, '0');
 
       const tEl = document.getElementById('ecd-' + i + '-total');
       if (tEl) tEl.textContent = getRemainingText(diff, mode);
