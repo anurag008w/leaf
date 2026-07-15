@@ -1415,153 +1415,164 @@ const ZoneApp = (() => {
     renderDayProgress();
   }
 
+  function ttSelectZone(idx) { state.ttZoneIdx = idx; renderTimeTravelView(document.getElementById('tabBody'), state.selectedDate, getZones()); }
+
   function renderTimeTravelView(body, date, zones) {
     const log = state.tracking.log;
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
     const events = log.filter(e => e.date === date).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     const archived = events.length === 0 ? (state.tracking.archivedDaily || {})[date] : null;
-
-    const timerSessions = archived ? archived.sessions : events.filter(e => e.type === 'session_complete').length;
-    const zonesWithTimer = new Set(events.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
-    const manualDone = archived ? archived.manualDone : events.filter(e => e.type === 'zone_complete' && !zonesWithTimer.has(e.zoneIdx)).length;
-    const totalFocus = archived ? archived.focusMin
-      : events.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0)
-      + events.filter(e => e.type === 'zone_complete' && !zonesWithTimer.has(e.zoneIdx)).reduce((a, e) => a + (zoneLookup(e.zoneIdx).focusDuration || 25), 0)
-      + events.filter(e => e.type === 'overtime').reduce((a, e) => a + Math.round((e.seconds || 0) / 60), 0);
-    const sessions = timerSessions + manualDone;
-    const skips = archived ? archived.skips : events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
-    const pauses = events.filter(e => e.type === 'pause').length;
-    const stops = events.filter(e => e.type === 'stop').length;
-    const rate = sessions + skips > 0 ? Math.round((sessions / (sessions + skips)) * 100) : 0;
-
-    const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' });
-
-    // Zone rows for sidebar
     const dz = (state.tracking.dailyZones || {})[date];
-    const sidebarHtml = zones.map((z, i) => {
-      let status = '', dotClass = '';
-      if (dz && dz.completed[i]) { status = 'Done'; dotClass = 'done'; }
-      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i && zonesWithTimer.has(i))) { status = 'Done'; dotClass = 'done'; }
-      else if (events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)) { status = 'Done (manual)'; dotClass = 'done'; }
-      else if (events.some(e => (e.type === 'skip_zone' || e.type === 'skip_block') && e.zoneIdx === i)) { status = 'Skipped'; dotClass = 'skip'; }
-      const dayLog = events.filter(e => e.zoneIdx === i);
-      const mins = dayLog.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
-      return `<button class="zone-btn" style="--zc:${z.color}">
-        <div class="zb-bar" style="background:${z.color}"></div>
+    const ttZi = state.ttZoneIdx ?? state.currentZoneIdx ?? 0;
+    const z = zones[ttZi] || zones[0];
+    if (state.ttZoneIdx === undefined) state.ttZoneIdx = ttZi;
+
+    // Per-zone data
+    const zoneEvents = events.filter(e => e.zoneIdx === ttZi);
+    const zonesWithTimer = new Set(events.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
+    const zoneDone = (dz && dz.completed[ttZi]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === ttZi);
+    const zoneSkipped = !zoneDone && events.some(e => (e.type === 'skip_zone' || e.type === 'skip_block') && e.zoneIdx === ttZi);
+    const zoneSessions = zoneEvents.filter(e => e.type === 'session_complete').length;
+    const zoneMins = zoneEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+    const zonePauses = zoneEvents.filter(e => e.type === 'pause').length;
+    const zoneSkips = zoneEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+
+    // Day-wide data
+    const allSessions = archived ? archived.sessions : events.filter(e => e.type === 'session_complete').length;
+    const allManual = archived ? archived.manualDone : events.filter(e => e.type === 'zone_complete' && !zonesWithTimer.has(e.zoneIdx)).length;
+    const allDone = allSessions + allManual;
+    const allSkips = archived ? archived.skips : events.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+    const completedZones = zones.filter((zz, i) => (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)).length;
+    const dayPct = zones.length > 0 ? Math.round((completedZones / zones.length) * 100) : 0;
+
+    // Cycle timeline for selected zone
+    const cycles = z.totalCycles || 3;
+    const cycleEvents = zoneEvents.filter(e => e.type === 'session_complete');
+    const cyclesCompleted = zoneDone ? cycles : Math.min(cycleEvents.length, cycles);
+    let tlHTML = '';
+    for (let i = 0; i < cycles; i++) {
+      const focusDone = i < cyclesCompleted || zoneDone;
+      const breakDone = i < cyclesCompleted;
+      const focusPct = focusDone ? 100 : (i === cyclesCompleted && cycleEvents.length > i ? 50 : 0);
+      const breakDur = getBreakDur(z, i);
+      tlHTML += `<div class="tl-group">
+        <div class="tl-block ${focusDone ? 'done' : ''}" style="--zc:${z.color}">
+          <div class="tlb-head"><span class="tlb-name">${cycleTitle(z, i)}</span><span class="tlb-dur">${z.focusDuration || 25}m</span></div>
+          <div class="tlb-track"><i style="width:${focusPct}%"></i></div>
+          <div class="tlb-status">${focusDone ? '✓' : ''}</div>
+        </div>
+        <div class="tl-block tl-break ${breakDone ? 'done' : ''}">
+          <div class="tlb-head"><span class="tlb-name">Break</span><span class="tlb-dur">${breakDur}m</span></div>
+          <div class="tlb-track"><i style="width:${breakDone ? 100 : 0}%"></i></div>
+          <div class="tlb-status">${breakDone ? '✓' : ''}</div>
+        </div>
+      </div>`;
+    }
+
+    // Ring
+    const ringFrac = zoneDone ? 1 : (zoneSkipped ? 0 : (cycles > 0 ? cyclesCompleted / cycles : 0));
+    const ringTime = zoneDone ? '✓ DONE' : (zoneSkipped ? 'SKIPPED' : `${cyclesCompleted}/${cycles}`);
+    const ringLabel = zoneDone ? 'ZONE COMPLETE' : (zoneSkipped ? 'ZONE SKIPPED' : `${zoneSessions} sessions · ${zoneMins}m`);
+
+    // Cycle dots
+    const cycleDotsHtml = Array.from({length: cycles}, (_, i) =>
+      `<span class="cdot ${i < cyclesCompleted ? 'filled' : ''}" style="--zc:${z.color}"></span>`
+    ).join('');
+
+    // Sidebar — same structure as normal
+    const sidebarHtml = zones.map((zz, i) => {
+      const iDone = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
+      const iSkipped = !iDone && events.some(e => (e.type === 'skip_zone' || e.type === 'skip_block') && e.zoneIdx === i);
+      const dotClass = iDone ? 'done' : (iSkipped ? 'skip' : '');
+      const iEvents = events.filter(e => e.zoneIdx === i);
+      const iMins = iEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+      const iSessions = iEvents.filter(e => e.type === 'session_complete').length;
+      return `<button class="zone-btn ${i === ttZi ? 'active' : ''}" style="--zc:${zz.color}" onclick="ZoneApp.ttSelectZone(${i})">
+        <div class="zb-bar" style="background:${zz.color}"></div>
         <div class="zb-body">
           <div class="zb-top">
-            <span class="zb-id">Z${String(z.id ?? i + 1).padStart(2,'0')}</span>
-            <span class="zb-type">${esc(z.type || 'FOCUS')}</span>
+            <span class="zb-id">Z${String(zz.id ?? i + 1).padStart(2,'0')}</span>
+            <span class="zb-type">${esc(zz.type || 'FOCUS')}</span>
             <span class="dot ${dotClass}"></span>
           </div>
-          <div class="zb-name">${esc(z.title)}</div>
+          <div class="zb-name">${esc(zz.title)}</div>
           <div class="zb-bottom">
-            <span class="zb-time">${to12h(z.startTime)} — ${to12h(z.endTime)}</span>
-            <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">${mins || 0}m · ${status || 'No activity'}</span>
+            <span class="zb-time">${to12h(zz.startTime)} — ${to12h(zz.endTime)}</span>
+            <span class="zb-progress"><i style="width:${iDone ? 100 : (iSessions > 0 ? Math.min(50, iSessions * 25) : 0)}%"></i></span>
           </div>
         </div>
       </button>`;
     }).join('');
 
-    // Timeline events
-    const eventIcon = { session_start:'▶', session_complete:'✓', skip_block:'⏭', pause:'⏸', skip_zone:'⏩', zone_complete:'🏁', break:'☕', stop:'⏹', overtime:'⏱' };
-    const eventLbl = { session_start:'Started', session_complete:'Complete', skip_block:'Skip block', pause:'Paused', skip_zone:'Skip zone', zone_complete:'Zone done', break:'Break', stop:'Stopped', overtime:'Overtime' };
-    const timeline = events.slice(-50).reverse().map(e => `
-      <div class="dc-event">
-        <span class="dc-ei" style="background:${e.type === 'session_complete' ? 'var(--accent-lecture)' : e.type === 'pause' || e.type === 'stop' ? 'var(--accent-solve)' : e.type === 'overtime' ? 'var(--accent-suc)' : 'var(--bg-3)'}">${eventIcon[e.type] || '•'}</span>
-        <span class="dc-et">${e.time ? new Date(e.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '--:--'}</span>
-        <span class="dc-el">${eventLbl[e.type] || e.type}</span>
-        <span class="dc-ez">${e.zoneName || (e.zoneIdx !== undefined ? `Z${e.zoneIdx+1}` : '')}</span>
-        ${e.duration ? `<span class="dc-ed">${e.duration}m</span>` : ''}${e.seconds ? `<span class="dc-ed">+${e.seconds}s</span>` : ''}
-      </div>`).join('');
-
-    // Calendar events
-    const calEvents = getMergedEvents().filter(e => e.date === date);
-
-    // Day progress bars
-    const totalZones = zones.length;
-    const completedZones = zones.filter((z, i) =>
-      (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i)
-    ).length;
-    const pct = totalZones > 0 ? Math.round((completedZones / totalZones) * 100) : 0;
-
     body.innerHTML = `
       <div class="console-toolbar">
         <div class="ct-left">
-          <span class="ct-label" style="color:var(--accent-lecture)">⏰ TIME TRAVEL · ${esc(dateLabel)}</span>
+          <button class="ct-btn sidebar-toggle" onclick="ZoneApp.toggleSidebar()" title="Toggle sidebar">☰</button>
+          <span class="ct-label" style="color:var(--accent-lecture)">⏰ TIME TRAVEL · ${esc(new Date(date + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' }))}</span>
         </div>
         <div class="ct-actions">
           <button class="ct-btn" onclick="ZoneApp.clearTimeTravel()" style="color:var(--accent-lecture);font-weight:600">← TODAY</button>
         </div>
       </div>
       <div class="layout ${state.sidebarOpen ? '' : 'sidebar-collapsed'}">
-        <div class="sidebar">${sidebarHtml}</div>
-        <div class="panel" style="--zc:var(--accent-lecture)">
+        <div class="sidebar" id="ttSidebar">${sidebarHtml}</div>
+        <div class="panel" style="--zc:${z.color}">
           <div class="panel-glow"></div>
           <div class="panel-head">
             <div>
-              <div class="kicker mono" style="color:var(--accent-lecture)">📅 ${esc(dateLabel)}</div>
-              <h2>Day Summary</h2>
+              <div class="kicker mono">${to12h(z.startTime)} — ${to12h(z.endTime)}</div>
+              <h2>${esc(z.title)}</h2>
             </div>
-            <div class="ph-right" style="display:flex;gap:12px;align-items:center">
-              <div style="text-align:right">
-                <div style="font-size:22px;font-weight:700;color:var(--accent-lecture);font-family:var(--mono)">${Math.round(totalFocus)}m</div>
-                <div style="font-size:10px;color:var(--text-muted)">FOCUS</div>
-              </div>
+            <div class="ph-right">
+              <span class="type-badge" style="--badge-c:${z.color}">${esc(z.type || 'FOCUS')}</span>
+              <div class="cycle-dots" id="cycleDots">${cycleDotsHtml}</div>
             </div>
           </div>
-          <div style="padding:0 20px 16px">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
-              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
-                <div style="font-size:18px;font-weight:700">${sessions}</div>
-                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">DONE</div>
-              </div>
-              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
-                <div style="font-size:18px;font-weight:700;color:var(--accent-break)">${pauses}</div>
-                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">PAUSES</div>
-              </div>
-              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
-                <div style="font-size:18px;font-weight:700;color:var(--accent-solve)">${skips + stops}</div>
-                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">SKIPS</div>
-              </div>
-              <div style="text-align:center;padding:10px 0;background:var(--bg-2);border-radius:8px">
-                <div style="font-size:18px;font-weight:700">${rate}%</div>
-                <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">RATE</div>
+          <div class="timer-area">
+            <div class="ring-section">
+              <div class="ring-wrap" style="--zc:${z.color}">
+                ${ringSVG(ringFrac, z.color)}
+                <div class="ring-center">
+                  <div class="ring-time mono" style="color:${z.color}">${ringTime}</div>
+                  <div class="ring-label">${ringLabel}</div>
+                </div>
               </div>
             </div>
-            ${calEvents.length > 0 ? `
-            <div style="margin-bottom:12px">
-              <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px">CALENDAR EVENTS</div>
-              ${calEvents.map(e => `
-                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:4px;background:var(--bg-2);border-radius:6px;border-left:3px solid ${e.color}">
-                  <span style="flex:1;font-size:12px">${esc(e.title)}</span>
-                  <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">${esc(e.start || '')}${e.end ? '–'+esc(e.end) : ''}</span>
-                </div>`).join('')}
-            </div>` : ''}
-            <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px">TIMELINE (${events.length} events)</div>
-            <div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">
-              ${archived ? '<div style="color:var(--text-muted);font-size:12px;padding:12px 0;text-align:center">Archived — only summary available</div>'
-                : events.length === 0 ? '<div style="color:var(--text-muted);font-size:12px;padding:12px 0;text-align:center">No activity on this day</div>'
-                : timeline}
+            <div class="tl-section">
+              <div class="tl-header">
+                <span>SEQUENCE</span>
+                <span class="tl-hdr-dur">${z.focusDuration || 25}m focus · ${getBreakDur(z, 0)}m break</span>
+              </div>
+              <div class="tl-scroll">${tlHTML}</div>
             </div>
           </div>
+          <div class="controls">
+            <div style="display:flex;gap:8px;align-items:center;width:100%;padding:0 4px">
+              <span style="font-size:12px;font-weight:600;color:${zoneDone ? 'var(--accent-solve)' : zoneSkipped ? 'var(--accent-break)' : 'var(--text-muted)'}">
+                ${zoneDone ? '✓ DONE' : zoneSkipped ? '⏭ SKIPPED' : `${zoneSessions} sessions · ${zoneMins}m · ${zonePauses} pauses`}
+              </span>
+              <span style="flex:1"></span>
+              <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">${date}</span>
+            </div>
+          </div>
+          <div class="zone-note">${esc(z.subtitle || '')}</div>
         </div>
       </div>
       <div class="day-progress">
         <div class="dp-header">
           <span class="dp-title">DAY PROGRESS</span>
-          <span class="dp-pct mono">${pct}%</span>
+          <span class="dp-pct mono">${dayPct}%</span>
         </div>
         <div class="dp-strip">
-          ${zones.map((z, i) => {
-            const done = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
-            return `<div style="flex:1;height:100%;background:${done ? z.color : 'var(--bg-3)'};opacity:${done ? 1 : 0.3};border-radius:2px" title="${esc(z.title)}: ${done ? 'Done' : 'Pending'}"></div>`;
+          ${zones.map((zz, i) => {
+            const iDone = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
+            return `<div class="dp-seg" onclick="ZoneApp.ttSelectZone(${i})" title="${esc(zz.title)}"><i style="width:${iDone ? 100 : 0}%;background:${zz.color}"></i></div>`;
           }).join('')}
         </div>
         <div class="dp-labels">
-          ${zones.map((z, i) => {
-            const done = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
-            return `<span style="font-size:9px;color:var(--text-muted);text-align:center;flex:1;${done ? 'color:var(--accent-solve)' : ''}">${done ? '✓' : '—'}</span>`;
+          ${zones.map((zz, i) => {
+            const iDone = (dz && dz.completed[i]) || events.some(e => e.type === 'zone_complete' && e.zoneIdx === i);
+            return `<span style="color:${i === ttZi ? zz.color : ''};${iDone ? 'color:var(--accent-solve)' : ''}" onclick="ZoneApp.ttSelectZone(${i})">${esc(zz.title)}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -4307,7 +4318,7 @@ const ZoneApp = (() => {
     openOnboarding, selectExamTrack, confirmExamTrack, closeModal, skipOnboarding,
     showAddEvent, saveEvent, deleteEvent,
     showEditEvent, updateEvent,
-    calPrev, calNext, calToday, showDayMenu, setCalDate, clearTimeTravel,
+    calPrev, calNext, calToday, showDayMenu, setCalDate, clearTimeTravel, ttSelectZone,
     closeAndAddEvent, closeAndEditEvent,
     exportEvents, importEvents, exportConfig, importConfig,
     toggleSetting, clearStats, resetAll, logout,
