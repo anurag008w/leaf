@@ -69,7 +69,7 @@
           <div style="display:flex;gap:10px">
             <div style="flex:1">
               <span class="field-label">Zone</span>
-              <select id="tlAddZone" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
+              <select id="tlAddZone" onchange="ZoneApp._tlUpdateCycleOptions('tlAddCycle', this.value)" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
                 <option value="-1">None</option>
                 ${zones.map((z, i) => `<option value="${i}">Z${String(z.id ?? i + 1).padStart(2,'0')} ${esc(z.title)}</option>`).join('')}
               </select>
@@ -78,7 +78,6 @@
               <span class="field-label">Cycle</span>
               <select id="tlAddCycle" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
                 <option value="-1">Any</option>
-                ${[...Array(zones[0]?.totalCycles || 4)].map((_, i) => `<option value="${i}">Cycle ${i + 1}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -91,6 +90,8 @@
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     setTimeout(() => { const el = document.getElementById('tlAddText'); if (el) el.focus(); }, 50);
+    // Auto-populate cycles with max across all zones
+    setTimeout(() => ZoneApp._tlUpdateCycleOptions('tlAddCycle', '-1'), 10);
   }
 
   /* ── Edit Modal ────────────────────────────────────────── */
@@ -114,7 +115,7 @@
           <div style="display:flex;gap:10px">
             <div style="flex:1">
               <span class="field-label">Zone</span>
-              <select id="tlEditZone" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
+              <select id="tlEditZone" onchange="ZoneApp._tlUpdateCycleOptions('tlEditCycle', this.value)" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
                 <option value="-1" ${t.zoneIdx === -1 ? 'selected' : ''}>None</option>
                 ${zones.map((z, i) => `<option value="${i}" ${t.zoneIdx === i ? 'selected' : ''}>Z${String(z.id ?? i + 1).padStart(2,'0')} ${esc(z.title)}</option>`).join('')}
               </select>
@@ -123,7 +124,6 @@
               <span class="field-label">Cycle</span>
               <select id="tlEditCycle" style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--text-primary);font-size:12px;font-family:var(--mono);cursor:pointer;outline:none">
                 <option value="-1" ${t.cycle === -1 ? 'selected' : ''}>Any</option>
-                ${[...Array(zones[0]?.totalCycles || 4)].map((_, i) => `<option value="${i}" ${t.cycle === i ? 'selected' : ''}>Cycle ${i + 1}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -139,6 +139,8 @@
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     setTimeout(() => { const el = document.getElementById('tlEditText'); if (el) { el.focus(); el.select(); } }, 50);
+    // Auto-populate cycles for selected zone
+    setTimeout(() => ZoneApp._tlUpdateCycleOptions('tlEditCycle', document.getElementById('tlEditZone')?.value ?? '-1', t.cycle), 10);
   }
 
   /* ── Delete Confirm ────────────────────────────────────── */
@@ -300,6 +302,19 @@
   ZoneApp._tlCloseDelModal = function () { const m = document.getElementById('tlDelModal'); if (m) m.remove(); };
   ZoneApp._tlCloseCompleteModal = function () { const m = document.getElementById('tlCompleteModal'); if (m) m.remove(); };
   ZoneApp._tlFilterDone = function (v) { filterDone = v; renderTodoTab(); };
+
+  ZoneApp._tlUpdateCycleOptions = function (selectId, zoneVal, preSelect) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const zones = getZones();
+    const zIdx = Number(zoneVal);
+    const cycles = (zIdx >= 0 && zones[zIdx]) ? (zones[zIdx].totalCycles || 4) : Math.max(...zones.map(z => z.totalCycles || 4));
+    let html = `<option value="-1" ${preSelect === -1 || preSelect === undefined ? 'selected' : ''}>Any</option>`;
+    for (let i = 0; i < cycles; i++) {
+      html += `<option value="${i}" ${preSelect === i ? 'selected' : ''}>Cycle ${i + 1}</option>`;
+    }
+    sel.innerHTML = html;
+  };
 
   ZoneApp.renderTodoTab = renderTodoTab;
 })();
