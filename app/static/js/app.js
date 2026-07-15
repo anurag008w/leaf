@@ -22,7 +22,8 @@ const ZoneApp = (() => {
     wpStyle: 'mission_control', wpSize: 'mobile',
     audioCtx: null, timerHandle: null, notifAsked: false,
     examCountdownMode: 'full', // full | days | hours | mins | secs
-    selectedDate: null // time travel: null = real today, 'YYYY-MM-DD' = selected
+    selectedDate: null, // time travel: null = real today, 'YYYY-MM-DD' = selected
+    todos: []
   };
 
   let $root, $toastContainer;
@@ -242,6 +243,7 @@ const ZoneApp = (() => {
     saveUserDataToServer('settings');
     saveUserDataToServer('examTrack');
     saveUserDataToServer('examDates');
+    saveUserDataToServer('todos');
     saveUserDataToServer('onboarded');
     _lastHttpSave = Date.now();
     _pendingHttpSave = null;
@@ -263,6 +265,7 @@ const ZoneApp = (() => {
     storage().set('settings', state.settings);
     storage().set('examTrack', state.examTrack);
     storage().set('examDates', state.examDates);
+    storage().set('todos', state.todos);
     if (isGuest()) return;
     const beaconData = {
       session, stats: state.stats, tracking: state.tracking,
@@ -305,6 +308,7 @@ const ZoneApp = (() => {
     storage().set('settings', state.settings);
     storage().set('examTrack', state.examTrack);
     storage().set('examDates', state.examDates);
+    storage().set('todos', state.todos);
     if (isGuest()) return;
     if (now - _lastHttpSave < 5000) {
       if (!_pendingHttpSave) _pendingHttpSave = setTimeout(_flushHttpSave, 5000 - (now - _lastHttpSave));
@@ -1186,6 +1190,7 @@ const ZoneApp = (() => {
 
       <div class="tabs">
         <button class="tab-btn ${state.tab === 'console' ? 'active' : ''}" onclick="ZoneApp.switchTab('console')">CONSOLE</button>
+        <button class="tab-btn ${state.tab === 'todo' ? 'active' : ''}" onclick="ZoneApp.switchTab('todo')">TODO</button>
         <button class="tab-btn ${state.tab === 'wallpapers' ? 'active' : ''}" onclick="ZoneApp.switchTab('wallpapers')">WALLPAPERS</button>
         <button class="tab-btn ${state.tab === 'calendar' ? 'active' : ''}" onclick="ZoneApp.switchTab('calendar')">CALENDAR</button>
         <button class="tab-btn ${state.tab === 'stats' ? 'active' : ''}" onclick="ZoneApp.switchTab('stats')">STATS</button>
@@ -1226,6 +1231,7 @@ const ZoneApp = (() => {
       case 'calendar': renderCalendarTab(); break;
       case 'stats': renderStatsTab(); break;
       case 'exam-timer': renderExamTimerTab(); break;
+      case 'todo': if (typeof ZoneApp.renderTodoTab === 'function') ZoneApp.renderTodoTab(); break;
       case 'settings': renderSettingsTab(); break;
     }
   }
@@ -3759,7 +3765,7 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -3773,6 +3779,8 @@ const ZoneApp = (() => {
     storage().set('config', state.config);
     storage().set('examTrack', null);
     storage().set('examDates', []);
+    storage().set('todos', []);
+    state.todos = [];
     location.reload();
   }
 
@@ -3781,7 +3789,7 @@ const ZoneApp = (() => {
     if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4166,6 +4174,10 @@ const ZoneApp = (() => {
         storage().set('examDates', serverData.examDates);
         state.examDates = serverData.examDates;
       }
+      if (Array.isArray(serverData.todos)) {
+        storage().set('todos', serverData.todos);
+        state.todos = serverData.todos;
+      }
       if (serverData.onboarded) {
         storage().set('onboarded', true);
         state.onboarded = true;
@@ -4194,6 +4206,9 @@ const ZoneApp = (() => {
 
       const savedExamDates = storage().get('examDates');
       if (savedExamDates) state.examDates = savedExamDates;
+
+      const savedTodos = storage().get('todos');
+      if (Array.isArray(savedTodos)) state.todos = savedTodos;
 
       if (storage().get('onboarded')) {
         state.onboarded = true;
@@ -4332,7 +4347,8 @@ const ZoneApp = (() => {
     openExamDateEditor, saveExamDates,
     setCountdownMode,
     applyTheme, setTheme,
-    takeBreak, setSetting, applyPreset
+    takeBreak, setSetting, applyPreset,
+    _ctx: { state, getZones, esc, todayKey, storage, toast }
   };
 })();
 

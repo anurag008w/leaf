@@ -1,0 +1,272 @@
+/* ═══════════════════════════════════════════════════════════
+   Todo List — Premium themed UI
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Wrapper ─────────────────────────────────────────────── */
+.tl-wrap {
+  padding: 0 24px 100px;
+  max-width: 620px;
+}
+
+/* ── Time Travel Banner ──────────────────────────────────── */
+.tl-time-travel-banner {
+  padding: 12px 16px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent-solve);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+.tl-time-travel-banner strong { color: var(--text-primary); }
+
+/* ── Header ──────────────────────────────────────────────── */
+.tl-header {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tl-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.tl-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  font-family: var(--font);
+  letter-spacing: 0.2px;
+}
+.tl-stats {
+  display: flex;
+  gap: 10px;
+}
+.tl-stat {
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.8px;
+}
+.tl-stat-done { color: var(--accent-solve); }
+.tl-stat-pending { color: var(--accent-break); }
+
+/* ── Filters ─────────────────────────────────────────────── */
+.tl-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.tl-filter-btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  padding: 7px 16px;
+  border-radius: var(--r-btn);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.tl-filter-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  background: var(--bg-3);
+}
+.tl-filter-btn.active {
+  background: var(--accent-solve);
+  color: #0A0D13;
+  border-color: var(--accent-solve);
+  font-weight: 700;
+}
+.tl-filter-btn.active:hover {
+  filter: brightness(1.12);
+}
+
+/* ── List ─────────────────────────────────────────────────── */
+.tl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Empty State ──────────────────────────────────────────── */
+.tl-empty {
+  padding: 64px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-lg);
+}
+.tl-empty-icon {
+  font-size: 40px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.tl-empty-text {
+  font-size: 13px;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ── Todo Item ────────────────────────────────────────────── */
+.tl-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  transition: all var(--transition);
+}
+.tl-item:hover {
+  border-color: var(--line);
+  border-left-color: var(--accent-solve);
+  background: color-mix(in srgb, var(--bg-2) 96%, var(--accent-solve));
+}
+.tl-item.done {
+  opacity: 0.45;
+}
+.tl-item.done .tl-item-text {
+  text-decoration: line-through;
+}
+
+/* ── Checkbox ─────────────────────────────────────────────── */
+.tl-check {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  padding: 0;
+}
+.tl-check:hover {
+  border-color: var(--accent-solve);
+  background: color-mix(in srgb, var(--bg-2) 80%, var(--accent-solve));
+}
+.tl-check-icon {
+  font-size: 12px;
+  color: var(--accent-solve);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Item Body ────────────────────────────────────────────── */
+.tl-item-body {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.tl-item-text {
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--text-primary);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.tl-item-meta {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+/* ── Badges ───────────────────────────────────────────────── */
+.tl-badge {
+  font-size: 10px;
+  font-family: var(--mono);
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: var(--r-badge);
+  background: var(--bg-3);
+  color: var(--badge-c, var(--text-muted));
+  border: 1px solid var(--line);
+}
+.tl-badge-cycle { color: var(--accent-lecture); }
+
+/* ── Action Buttons ───────────────────────────────────────── */
+.tl-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.tl-action-btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  padding: 0;
+}
+.tl-action-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-primary);
+  border-color: var(--line);
+}
+.tl-del-btn:hover {
+  color: var(--danger);
+  background: rgba(242,107,107,0.1);
+  border-color: rgba(242,107,107,0.3);
+}
+
+/* ── Floating Add Button ──────────────────────────────────── */
+.tl-fab {
+  position: fixed;
+  bottom: 60px;
+  right: 28px;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-solve);
+  color: #0A0D13;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--accent-solve) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  z-index: 50;
+}
+.tl-fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 28px color-mix(in srgb, var(--accent-solve) 40%, transparent);
+  filter: brightness(1.1);
+}
+.tl-fab:active {
+  transform: scale(0.95);
+}
