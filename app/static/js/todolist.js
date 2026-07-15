@@ -197,12 +197,15 @@
     const isTimeTravel = state().selectedDate != null;
     const travelDate = state().selectedDate || todayKey();
 
-    let filtered = allTodos;
+    // Time travel: only show todos created on that date
+    let dayTodos = isTimeTravel ? allTodos.filter(t => t.created === travelDate) : allTodos;
+
+    let filtered = dayTodos;
     if (filterDone === 1) filtered = filtered.filter(t => !t.done);
     if (filterDone === 2) filtered = filtered.filter(t => t.done);
 
-    const doneCount = allTodos.filter(t => t.done).length;
-    const pendingCount = allTodos.length - doneCount;
+    const doneCount = dayTodos.filter(t => t.done).length;
+    const pendingCount = dayTodos.length - doneCount;
 
     body.innerHTML = `
       <div class="tl-wrap">
@@ -229,8 +232,8 @@
         <div class="tl-list">
           ${filtered.length === 0 ? `
             <div class="tl-empty">
-              <span class="tl-empty-icon">${allTodos.length === 0 ? '📝' : '🔍'}</span>
-              <span class="tl-empty-text">${allTodos.length === 0 ? 'No tasks yet — tap + to add one' : 'No tasks match this filter'}</span>
+              <span class="tl-empty-icon">${dayTodos.length === 0 ? '📝' : '🔍'}</span>
+              <span class="tl-empty-text">${dayTodos.length === 0 ? 'No tasks for this day' : 'No tasks match this filter'}</span>
             </div>
           ` : filtered.map(t => renderTodoItem(t, zones)).join('')}
         </div>
