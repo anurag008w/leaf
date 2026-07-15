@@ -1329,6 +1329,25 @@ input[type=range]::-moz-range-track {
   margin-top: 24px; font-size: 11px; color: var(--text-muted);
   text-align: center; font-family: var(--mono); letter-spacing: 0.5px;
 }
+/* ── Exam countdown mode toggle ── */
+.exam-cd-toggle {
+  display: flex; justify-content: center; gap: 0; margin-bottom: 16px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 3px; width: fit-content; margin-left: auto; margin-right: auto;
+}
+.exam-cd-btn {
+  padding: 6px 14px; font-size: 10px; font-family: var(--mono); letter-spacing: 1px;
+  border: none; border-radius: 8px; cursor: pointer; transition: all 0.15s;
+  background: transparent; color: var(--text-muted); font-weight: 500;
+}
+.exam-cd-btn:hover { color: var(--text-primary); background: var(--bg-3); }
+.exam-cd-btn.active {
+  background: var(--accent-lecture); color: #fff; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(56,189,248,0.2);
+}
+/* Single-number mode (days/hours/mins/secs) */
+.exam-unit-single { min-width: 100px; }
+.exam-num-big { font-size: 56px !important; }
 @media (max-width: 640px) {
   .exam-grid { grid-template-columns: 1fr; }
   .exam-countdown-wrap { width: 220px; height: 190px; }

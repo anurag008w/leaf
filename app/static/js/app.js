@@ -20,7 +20,8 @@ const ZoneApp = (() => {
     examTrack: null,
     examDates: [],
     wpStyle: 'mission_control', wpSize: 'mobile',
-    audioCtx: null, timerHandle: null, notifAsked: false
+    audioCtx: null, timerHandle: null, notifAsked: false,
+    examCountdownMode: 'full' // full | days | hours | mins | secs
   };
 
   let $root, $toastContainer;
@@ -2529,10 +2530,33 @@ const ZoneApp = (() => {
     });
   }
 
+  function setCountdownMode(mode) {
+    state.examCountdownMode = mode;
+    try { localStorage.setItem('zg:examCountdownMode', mode); } catch {}
+    renderExamTimerTab();
+  }
+
   function renderExamTimerTab() {
     const body = document.getElementById('tabBody');
     const exams = getExamDates();
     const now = Date.now();
+    const mode = state.examCountdownMode || 'full';
+
+    // Restore mode from localStorage
+    try {
+      const saved = localStorage.getItem('zg:examCountdownMode') || localStorage.getItem('zu:examCountdownMode');
+      if (saved && ['full','days','hours','mins','secs'].includes(saved)) {
+        state.examCountdownMode = saved;
+      }
+    } catch {}
+
+    const modes = [
+      { key: 'full', label: 'DD:HH:MM:SS' },
+      { key: 'days', label: 'Days' },
+      { key: 'hours', label: 'Hours' },
+      { key: 'mins', label: 'Mins' },
+      { key: 'secs', label: 'Secs' }
+    ];
 
     function ringSVG(target) {
       const diff = target - now;
@@ -2550,11 +2574,40 @@ const ZoneApp = (() => {
       </svg>`;
     }
 
+    function buildCountdownHTML(i, target, expired) {
+      if (expired) return '<div class="exam-expired">🎉 Exam Date Reached</div>';
+      const diff = target - now;
+      if (mode === 'full') {
+        return `
+          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
+          <span class="exam-sep">:</span>
+          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
+          <span class="exam-sep">:</span>
+          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
+          <span class="exam-sep">:</span>
+          <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>`;
+      }
+      const totalMap = {
+        days: { val: Math.floor(diff / 86400000), lbl: 'DAYS' },
+        hours: { val: Math.floor(diff / 3600000), lbl: 'HOURS' },
+        mins: { val: Math.floor(diff / 60000), lbl: 'MINS' },
+        secs: { val: Math.floor(diff / 1000), lbl: 'SECS' }
+      };
+      const t = totalMap[mode];
+      return `<div class="exam-unit exam-unit-single">
+        <span class="exam-num exam-num-big" id="ecd-${i}-single">${t.val}</span>
+        <span class="exam-lbl">${t.lbl}</span>
+      </div>`;
+    }
+
     body.innerHTML = `
       <div class="exam-timer-wrap">
         <div class="exam-timer-header">
           <h2>⏳ Exam Countdown${state.examTrack ? ' · ' + esc(state.examTrack) : ''}</h2>
           <button class="ctl" onclick="ZoneApp.openExamDateEditor()" style="padding:6px 14px;font-size:11px">✏️ Edit Dates</button>
+        </div>
+        <div class="exam-cd-toggle">
+          ${modes.map(m => `<button class="exam-cd-btn ${state.examCountdownMode === m.key ? 'active' : ''}" onclick="ZoneApp.setCountdownMode('${m.key}')">${m.label}</button>`).join('')}
         </div>
         <div class="exam-grid" id="examGrid">
           ${exams.map((e, i) => {
@@ -2570,19 +2623,10 @@ const ZoneApp = (() => {
               <div class="exam-countdown-wrap">
                 ${!expired ? ringSVG(target) : ''}
                 <div class="exam-countdown" id="ecd-${i}">
-                  ${expired ? '<div class="exam-expired">🎉 Exam Date Reached</div>'
-                  : `
-                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-d">00</span><span class="exam-lbl">Days</span></div>
-                    <span class="exam-sep">:</span>
-                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-h">00</span><span class="exam-lbl">Hours</span></div>
-                    <span class="exam-sep">:</span>
-                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-m">00</span><span class="exam-lbl">Mins</span></div>
-                    <span class="exam-sep">:</span>
-                    <div class="exam-unit"><span class="exam-num" id="ecd-${i}-s">00</span><span class="exam-lbl">Secs</span></div>
-                  `}
+                  ${buildCountdownHTML(i, target, expired)}
                 </div>
               </div>
-              ${!expired ? `<div class="exam-total" id="ecd-${i}-total">0 days remaining</div>` : ''}
+              ${!expired ? `<div class="exam-total" id="ecd-${i}-total">${getRemainingText(diff, state.examCountdownMode)}</div>` : ''}
             </div>`;
           }).join('')}
         </div>
@@ -2593,8 +2637,18 @@ const ZoneApp = (() => {
     tickExamTimers();
   }
 
+  function getRemainingText(diff, mode) {
+    const m = mode || 'full';
+    if (m === 'days') return Math.floor(diff / 86400000) + ' days remaining';
+    if (m === 'hours') return Math.floor(diff / 3600000) + ' hours remaining';
+    if (m === 'mins') return Math.floor(diff / 60000) + ' minutes remaining';
+    if (m === 'secs') return Math.floor(diff / 1000) + ' seconds remaining';
+    return Math.floor(diff / 86400000) + ' days remaining';
+  }
+
   function tickExamTimers() {
     const now = Date.now();
+    const mode = state.examCountdownMode || 'full';
     document.querySelectorAll('.exam-card[data-target]').forEach((card, i) => {
       const target = parseInt(card.dataset.target);
       const diff = target - now;
@@ -2615,16 +2669,25 @@ const ZoneApp = (() => {
       const hours = Math.floor((diff % 86400000) / 3600000);
       const mins = Math.floor((diff % 3600000) / 60000);
       const secs = Math.floor((diff % 60000) / 1000);
-      const dEl = document.getElementById('ecd-' + i + '-d');
-      const hEl = document.getElementById('ecd-' + i + '-h');
-      const mEl = document.getElementById('ecd-' + i + '-m');
-      const sEl = document.getElementById('ecd-' + i + '-s');
+
+      if (mode === 'full') {
+        const dEl = document.getElementById('ecd-' + i + '-d');
+        const hEl = document.getElementById('ecd-' + i + '-h');
+        const mEl = document.getElementById('ecd-' + i + '-m');
+        const sEl = document.getElementById('ecd-' + i + '-s');
+        if (dEl) dEl.textContent = String(days).padStart(2, '0');
+        if (hEl) hEl.textContent = String(hours).padStart(2, '0');
+        if (mEl) mEl.textContent = String(mins).padStart(2, '0');
+        if (sEl) sEl.textContent = String(secs).padStart(2, '0');
+      } else {
+        const sEl = document.getElementById('ecd-' + i + '-single');
+        const totalMap = { days: days, hours: Math.floor(diff / 3600000), mins: Math.floor(diff / 60000), secs: Math.floor(diff / 1000) };
+        if (sEl) sEl.textContent = totalMap[mode] ?? 0;
+      }
+
       const tEl = document.getElementById('ecd-' + i + '-total');
-      if (dEl) dEl.textContent = String(days).padStart(2,'0');
-      if (hEl) hEl.textContent = String(hours).padStart(2,'0');
-      if (mEl) mEl.textContent = String(mins).padStart(2,'0');
-      if (sEl) sEl.textContent = String(secs).padStart(2,'0');
-      if (tEl) tEl.textContent = days + ' days remaining';
+      if (tEl) tEl.textContent = getRemainingText(diff, mode);
+
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
         const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
