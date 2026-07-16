@@ -3521,19 +3521,25 @@ const ZoneApp = (() => {
       </button>
       <div class="za-body">
         <div class="za-grid">
-          <div class="za-field"><label>Title</label><input class="stg-input" type="text" id="zaTitle${i}" value="${esc(z.title)}"></div>
-          <div class="za-field"><label>Subtitle</label><input class="stg-input" type="text" id="zaSub${i}" value="${esc(z.subtitle || '')}"></div>
-          <div class="za-field"><label>Color</label><input class="stg-input" type="color" id="zaColor${i}" value="${z.color}" style="height:36px;padding:4px"></div>
-          <div class="za-field"><label>Type</label><select class="stg-select" id="zaType${i}" style="width:100%"><option value="focus" ${z.type==='focus'?'selected':''}>Focus</option><option value="review" ${z.type==='review'?'selected':''}>Review</option><option value="buffer" ${z.type==='buffer'?'selected':''}>Buffer</option></select></div>
-          <div class="za-field"><label>Focus (min)</label><input class="stg-input" type="number" id="zaFocus${i}" value="${z.focusDuration||25}" min="5" max="120"></div>
-          <div class="za-field"><label>Short Break (min)</label><input class="stg-input" type="number" id="zaBreak${i}" value="${z.breakDuration||5}" min="1" max="30"></div>
-          <div class="za-field"><label>Long Break (min)</label><input class="stg-input" type="number" id="zaLBreak${i}" value="${z.longBreakDuration||20}" min="5" max="60"></div>
-          <div class="za-field"><label>Long Break Every</label><input class="stg-input" type="number" id="zaCBC${i}" value="${z.cyclesBeforeLongBreak||5}" min="2" max="10"><span style="font-size:10px;color:var(--text-muted)">cycles</span></div>
-          <div class="za-field"><label>Max Cycles</label><input class="stg-input" type="number" id="zaTC${i}" value="${z.totalCycles||4}" min="1" max="20"></div>
-          <div class="za-field"><label>Max Time (min)</label><input class="stg-input" type="number" id="zaTL${i}" value="${z.timeLimit||180}" min="30" max="600"></div>
-          <div class="za-field"><label>Start Time</label><input class="stg-input" type="time" id="zaStart${i}" value="${z.startTime||''}"></div>
-          <div class="za-field"><label>End Time</label><input class="stg-input" type="time" id="zaEnd${i}" value="${z.endTime||''}"></div>
+          <div class="za-field"><label>Title</label><input class="stg-input" type="text" id="ze-${i}-title" value="${esc(z.title)}"></div>
+          <div class="za-field"><label>Subtitle</label><input class="stg-input" type="text" id="ze-${i}-sub" value="${esc(z.subtitle || '')}"></div>
+          <div class="za-field"><label>Color</label><input class="stg-input" type="color" id="ze-${i}-color" value="${z.color}" style="height:36px;padding:4px"></div>
+          <div class="za-field"><label>Type</label><select class="stg-select" id="ze-${i}-type" style="width:100%" onchange="ZoneApp.onZoneTypeChange(${i})"><option value="focus" ${z.type==='focus'?'selected':''}>Focus</option><option value="review" ${z.type==='review'?'selected':''}>Review</option><option value="buffer" ${z.type==='buffer'?'selected':''}>Buffer</option></select></div>
+          <div class="za-field"><label>Focus (min)</label><input class="stg-input" type="number" id="ze-${i}-focus" value="${z.focusDuration||25}" min="5" max="120" oninput="ZoneApp.recalcHint(${i})"></div>
+          <div class="za-field"><label>Short Break (min)</label><input class="stg-input" type="number" id="ze-${i}-break" value="${z.breakDuration||5}" min="1" max="30" oninput="ZoneApp.recalcHint(${i})"></div>
+          <div class="za-field"><label>Long Break (min)</label><input class="stg-input" type="number" id="ze-${i}-long" value="${z.longBreakDuration||20}" min="5" max="60" oninput="ZoneApp.recalcHint(${i})"></div>
+          <div class="za-field"><label>Long Break Every</label><input class="stg-input" type="number" id="ze-${i}-lb-cycle" value="${z.cyclesBeforeLongBreak||5}" min="2" max="10" oninput="ZoneApp.recalcHint(${i})"><span style="font-size:10px;color:var(--text-muted)">cycles</span></div>
+          <div class="za-field"><label>Max Cycles</label><input class="stg-input" type="number" id="ze-${i}-cycles" value="${z.totalCycles||4}" min="1" max="20" oninput="ZoneApp.recalcHint(${i});ZoneApp.syncCycleNames(${i})"></div>
+          <div class="za-field"><label>Max Time (min)</label><input class="stg-input" type="number" id="ze-${i}-tlim" value="${z.timeLimit||180}" min="30" max="600" oninput="ZoneApp.recalcHint(${i})"><div id="ze-${i}-tl-v" style="font-size:10px;color:var(--text-muted)">${z.timeLimit||180} min</div></div>
+          <div class="za-field"><label>Start Time</label><input class="stg-input" type="time" id="ze-${i}-start" value="${z.startTime||''}"></div>
+          <div class="za-field"><label>End Time</label><input class="stg-input" type="time" id="ze-${i}-end" value="${z.endTime||''}"></div>
         </div>
+        <!-- Recalc hint -->
+        <div id="ze-${i}-hint" style="margin-top:10px;font-size:11px;color:var(--text-muted)"></div>
+        <!-- Cycle titles -->
+        <div id="ze-${i}-ct-wrap" style="margin-top:12px">${renderCycleNames(z, i)}</div>
+        <!-- Remove zone -->
+        ${i > 0 ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);text-align:right"><button class="zone-remove" onclick="ZoneApp.removeZone(${i})">Remove this zone</button></div>` : ''}
       </div>
     </div>`).join('');
   }
@@ -3983,6 +3989,7 @@ const ZoneApp = (() => {
       tlSlider.value = max;
       if (tlVal) tlVal.textContent = max + ' min';
     }
+    recalcHint(i);
   }
 
   function calcZoneTotal(z) {
@@ -4005,6 +4012,8 @@ const ZoneApp = (() => {
     const z = { focusDuration: focus, breakDuration: brk, longBreakDuration: lng, cyclesBeforeLongBreak: lbCycle, totalCycles: cycles };
     const hint = document.getElementById(`ze-${i}-hint`);
     const tlEl = document.getElementById(`ze-${i}-tlim`);
+    const tlVal = document.getElementById(`ze-${i}-tl-v`);
+    if (tlVal && tlEl) tlVal.textContent = (parseInt(tlEl.value) || 180) + ' min';
     if (hint) {
       const total = calcZoneTotal(z);
       const tl = parseInt(tlEl?.value) || 180;
@@ -4094,7 +4103,7 @@ const ZoneApp = (() => {
       if (total > z.timeLimit) {
         err = true;
         badZones.push(z.title || `Zone ${i+1}`);
-        const card = document.querySelectorAll('.zone-editor-card')[i];
+        const card = document.querySelectorAll('.za-item')[i];
         if (card) {
           card.style.borderColor = 'var(--danger)';
           card.style.boxShadow = '0 0 0 1px var(--danger)';
@@ -4106,7 +4115,7 @@ const ZoneApp = (() => {
       return;
     }
 
-    document.querySelectorAll('.zone-editor-card').forEach(card => {
+    document.querySelectorAll('.za-item').forEach(card => {
       card.style.borderColor = '';
       card.style.boxShadow = '';
     });
