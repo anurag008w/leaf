@@ -2863,8 +2863,6 @@ const ZoneApp = (() => {
     const exams = getExamDates();
     const now = Date.now();
     const mode = state.examCountdownMode || 'full';
-    // Store initial diff per exam for ring depletion (captures time span on render)
-    if (!window._examInitialSpan) window._examInitialSpan = {};
 
     // Restore mode from localStorage
     try {
@@ -2882,16 +2880,27 @@ const ZoneApp = (() => {
       { key: 'secs', label: 'Secs' }
     ];
 
+    // Calculate ring fraction based on current countdown unit (industry standard)
+    // Ring depletes based on the highlighted unit's remaining fraction
+    function getRingFrac(diff, m) {
+      if (diff <= 0) return 0;
+      const secs = Math.floor((diff % 60000) / 1000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const days = Math.floor(diff / 86400000);
+      switch (m) {
+        case 'secs':  return secs / 60;        // depletes every minute
+        case 'mins':  return mins / 60;        // depletes every hour
+        case 'hours': return hours / 24;       // depletes every day
+        case 'days':  return (days % 30) / 30; // depletes every month
+        default:      return secs / 60;        // full mode: depletes every minute
+      }
+    }
+
     function ringSVG(target) {
       const diff = target - now;
       if (diff <= 0) return '';
-      // Capture initial diff on first render — this becomes the ring's total window
-      if (!window._examInitialSpan[target] || window._examInitialSpan[target] < diff) {
-        window._examInitialSpan[target] = diff;
-      }
-      const totalSpan = window._examInitialSpan[target];
-      // Depleting ring: full when just rendered, empties as exam approaches
-      const frac = Math.min(1, diff / totalSpan);
+      const frac = getRingFrac(diff, mode);
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -3006,9 +3015,14 @@ const ZoneApp = (() => {
 
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
-        const totalSpan = window._examInitialSpan?.[target] || diff;
-        // Depleting ring: full when just rendered, empties as exam approaches
-        const frac = Math.min(1, diff / totalSpan);
+        let frac;
+        switch (mode) {
+          case 'secs':  frac = secs / 60; break;
+          case 'mins':  frac = mins / 60; break;
+          case 'hours': frac = hours / 24; break;
+          case 'days':  frac = (days % 30) / 30; break;
+          default:      frac = secs / 60; break;
+        }
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
