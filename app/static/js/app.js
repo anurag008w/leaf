@@ -2880,34 +2880,25 @@ const ZoneApp = (() => {
       { key: 'secs', label: 'Secs' }
     ];
 
-    // Calculate ring fraction based on current countdown unit (industry standard)
-    // Ring depletes based on the highlighted unit's remaining fraction
-    function getRingFrac(diff, m) {
+    // Ring depletes based on remaining days vs a 365-day reference period
+    // Full ring when 365+ days left → empties as exam approaches → empty on exam day
+    function getRingFrac(diff) {
       if (diff <= 0) return 0;
-      const secs = Math.floor((diff % 60000) / 1000);
-      const mins = Math.floor((diff % 3600000) / 60000);
-      const hours = Math.floor((diff % 86400000) / 3600000);
-      const days = Math.floor(diff / 86400000);
-      switch (m) {
-        case 'secs':  return secs / 60;        // depletes every minute
-        case 'mins':  return mins / 60;        // depletes every hour
-        case 'hours': return hours / 24;       // depletes every day
-        case 'days':  return (days % 30) / 30; // depletes every month
-        default:      return secs / 60;        // full mode: depletes every minute
-      }
+      const days = diff / 86400000;
+      return Math.min(1, days / 365);
     }
 
     function ringSVG(target) {
       const diff = target - now;
       if (diff <= 0) return '';
-      const frac = getRingFrac(diff, mode);
+      const frac = getRingFrac(diff);
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
         <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--bg-3)" stroke-width="12"/>
         <circle cx="${cx}" cy="${cy}" r="${r - 10}" fill="none" stroke="var(--accent-lecture)" stroke-width="12"
           stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"
-          style="transition:stroke-dashoffset .5s linear;transform:rotate(-90deg);transform-origin:${cx}px ${cy}px"/>
+          style="transition:stroke-dashoffset 2s ease;transform:rotate(-90deg);transform-origin:${cx}px ${cy}px"/>
       </svg>`;
     }
 
@@ -3015,14 +3006,8 @@ const ZoneApp = (() => {
 
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
-        let frac;
-        switch (mode) {
-          case 'secs':  frac = secs / 60; break;
-          case 'mins':  frac = mins / 60; break;
-          case 'hours': frac = hours / 24; break;
-          case 'days':  frac = (days % 30) / 30; break;
-          default:      frac = secs / 60; break;
-        }
+        const days = diff / 86400000;
+        const frac = Math.min(1, days / 365);
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
