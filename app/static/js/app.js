@@ -2863,6 +2863,8 @@ const ZoneApp = (() => {
     const exams = getExamDates();
     const now = Date.now();
     const mode = state.examCountdownMode || 'full';
+    // Store initial diff per exam for ring depletion (captures time span on render)
+    if (!window._examInitialSpan) window._examInitialSpan = {};
 
     // Restore mode from localStorage
     try {
@@ -2883,9 +2885,13 @@ const ZoneApp = (() => {
     function ringSVG(target) {
       const diff = target - now;
       if (diff <= 0) return '';
-      const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-      // Depleting ring: full when lots of time left, empties as exam approaches
-      const frac = Math.min(1, diff / ONE_YEAR);
+      // Capture initial diff on first render — this becomes the ring's total window
+      if (!window._examInitialSpan[target] || window._examInitialSpan[target] < diff) {
+        window._examInitialSpan[target] = diff;
+      }
+      const totalSpan = window._examInitialSpan[target];
+      // Depleting ring: full when just rendered, empties as exam approaches
+      const frac = Math.min(1, diff / totalSpan);
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -3000,9 +3006,9 @@ const ZoneApp = (() => {
 
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
-        const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-        // Depleting ring: full when lots of time left, empties as exam approaches
-        const frac = Math.min(1, diff / ONE_YEAR);
+        const totalSpan = window._examInitialSpan?.[target] || diff;
+        // Depleting ring: full when just rendered, empties as exam approaches
+        const frac = Math.min(1, diff / totalSpan);
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
