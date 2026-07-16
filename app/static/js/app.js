@@ -3248,161 +3248,299 @@ const ZoneApp = (() => {
   // ─── SETTINGS TAB ───────────────────────────
   async function renderSettingsTab() {
     const body = document.getElementById('tabBody');
-    // Render settings immediately, don't wait for network
+    const sections = [
+      { id: 'account', icon: '👤', label: 'Account', show: !!state.username },
+      { id: 'appearance', icon: '🎨', label: 'Appearance' },
+      { id: 'timer', icon: '⏱', label: 'Focus & Timer' },
+      { id: 'notifications', icon: '🔔', label: 'Notifications' },
+      { id: 'calendar', icon: '📅', label: 'Calendar' },
+      { id: 'schedule', icon: '📚', label: 'Study Schedule' },
+      { id: 'backup', icon: '☁️', label: 'Backup & Sync' },
+      { id: 'data', icon: '📦', label: 'Data' },
+      { id: 'danger', icon: '⚠️', label: 'Danger Zone' },
+    ];
+    if (state.isAdmin) sections.push({ id: 'admin', icon: '🔑', label: 'Admin' });
+
+    const toggleHTML = (id, val) => `<div class="stg-toggle ${val ? 'on' : 'off'}" onclick="ZoneApp._stgToggle('${id}')"><div class="stg-toggle-knob"></div></div>`;
+
     body.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
-        <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
-        <div class="settings-grid">
-          ${state.username ? `
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Account</div>
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;gap:8px;align-items:center">
-                <div style="font-size:13px;font-weight:600;color:var(--text-primary);min-width:70px">Username</div>
-                <input type="text" id="usernameInput" value="${esc(state.username)}" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:14px;font-weight:600">
-                <button class="ctl primary" onclick="ZoneApp.changeUsername()" style="padding:8px 14px;font-size:11px">Save</button>
+      <h2 style="font-size:20px;font-weight:700;margin-bottom:20px">⚙️ Settings</h2>
+      <div class="stg-layout">
+        <div class="stg-sidebar">
+          ${sections.filter(s => s.show !== false).map((s, i) => `<button class="stg-nav-btn ${i === 0 ? 'active' : ''}" onclick="ZoneApp._stgNav('${s.id}', this)"><span class="stg-nav-icon">${s.icon}</span>${s.label}</button>`).join('')}
+        </div>
+        <div class="stg-content">
+          <!-- Account -->
+          <div class="stg-section active" id="stg-account">
+            <div class="stg-card">
+              <div class="stg-card-title">👤 Account</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Username</div></div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input class="stg-input" type="text" id="usernameInput" value="${esc(state.username)}" style="width:160px">
+                  <button class="ctl primary" onclick="ZoneApp.changeUsername()" style="padding:6px 14px;font-size:11px">Save</button>
+                </div>
               </div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <div style="font-size:13px;font-weight:600;color:var(--text-primary);min-width:70px">Password</div>
-                <input type="password" id="currentPwInput" placeholder="Current password" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:13px">
-                <input type="password" id="newPwInput" placeholder="New password" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:13px">
-                <button class="ctl primary" onclick="ZoneApp.changePassword()" style="padding:8px 14px;font-size:11px">Change</button>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Password</div></div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <input class="stg-input" type="password" id="currentPwInput" placeholder="Current" style="width:120px">
+                  <input class="stg-input" type="password" id="newPwInput" placeholder="New" style="width:120px">
+                  <button class="ctl primary" onclick="ZoneApp.changePassword()" style="padding:6px 14px;font-size:11px">Change</button>
+                </div>
+              </div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Logout</div><div class="stg-row-desc">Sign out of your account</div></div>
+                <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:6px 14px;font-size:11px">🚪 Logout</button>
               </div>
             </div>
           </div>
-          ` : ''}
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Goal</div>
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;gap:8px;align-items:center">
-                <input type="text" id="goalNameInput" value="${esc(state.config?.identity?.goalName || '')}" placeholder="e.g. NEET 2026" style="flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:14px;font-weight:600">
-                <button class="ctl primary" onclick="ZoneApp.saveGoalName()" style="padding:8px 14px;font-size:11px">Save</button>
+
+          <!-- Appearance -->
+          <div class="stg-section" id="stg-appearance">
+            <div class="stg-card">
+              <div class="stg-card-title">🎨 Theme</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
+                ${[
+                  { id:'hacker', label:'Hacker', icon:'💚', desc:'Matrix green' },
+                  { id:'cyber', label:'Cyberpunk', icon:'💜', desc:'Neon purple' },
+                  { id:'midnight', label:'Midnight', icon:'💙', desc:'Deep blue' },
+                  { id:'amber', label:'Amber', icon:'🧡', desc:'Warm glow' },
+                  { id:'corporate', label:'Corporate', icon:'💼', desc:'Clean blue' },
+                  { id:'platinum', label:'Platinum', icon:'✨', desc:'Gold/Silver' }
+                ].map(t => `<button onclick="ZoneApp.setTheme('${t.id}')" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
+                  <span style="font-size:22px;line-height:1">${t.icon}</span>
+                  <span style="font-size:11px;font-weight:600">${t.label}</span>
+                  <span style="font-size:9px;color:var(--text-muted)">${t.desc}</span>
+                </button>`).join('')}
               </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
-                <div><div style="font-weight:500;font-size:13px">${state.config?.identity?.examTrack || 'Not set'}</div><div style="font-size:11px;color:var(--text-muted)">Exam track</div></div>
+            </div>
+            <div class="stg-card">
+              <div class="stg-card-title">✏️ Goal</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Goal Name</div></div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input class="stg-input" type="text" id="goalNameInput" value="${esc(state.config?.identity?.goalName || '')}" placeholder="e.g. NEET 2026" style="width:180px">
+                  <button class="ctl primary" onclick="ZoneApp.saveGoalName()" style="padding:6px 14px;font-size:11px">Save</button>
+                </div>
+              </div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Exam Track</div><div class="stg-row-desc">${state.config?.identity?.examTrack || 'Not set'}</div></div>
                 <button class="ctl" onclick="ZoneApp.openOnboarding()" style="padding:6px 14px;font-size:11px">Change</button>
               </div>
             </div>
           </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Notifications & Sound</div>
-            ${[
-              { id: 'notifEnabled', label: 'Browser Notifications', desc: 'Get notified when blocks end', val: state.settings.notifEnabled },
-              { id: 'soundEnabled', label: 'Sound Effects', desc: 'Play sounds on timer events', val: state.settings.soundEnabled },
-              { id: 'quietMode', label: 'Quiet Mode', desc: 'Suppress non-critical notifications', val: state.settings.quietMode }
-            ].map(s => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
-              <div><div style="font-weight:500;font-size:13px">${s.label}</div><div style="font-size:11px;color:var(--text-muted)">${s.desc}</div></div>
-              <div style="width:44px;height:24px;border-radius:12px;background:${s.val ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('${s.id}')">
-                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+
+          <!-- Focus & Timer -->
+          <div class="stg-section" id="stg-timer">
+            <div class="stg-card">
+              <div class="stg-card-title">⏱ Timer Preset</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
+                ${Object.entries(TIMER_PRESETS).filter(([k]) => k !== 'custom').map(([k, p]) => `<button onclick="ZoneApp.setSetting('timerPreset', '${k}')" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
+                  <span style="font-size:13px;font-weight:600">${p.label}</span>
+                  <span style="font-size:10px;color:var(--text-muted)">${p.focus}m focus · ${p.break}m break</span>
+                </button>`).join('')}
               </div>
-            </div>`).join('')}
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0">
-              <div><div style="font-weight:500;font-size:13px">Sound Pack</div><div style="font-size:11px;color:var(--text-muted)">Tone profile for timer events</div></div>
-              <select onchange="ZoneApp.setSetting('soundPack', this.value)" style="background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--text-primary);font-size:12px;font-family:var(--mono)">
-                ${Object.entries(SOUND_PACKS).map(([k, v]) => `<option value="${k}" ${state.settings.soundPack === k ? 'selected' : ''}>${v.label || k.charAt(0).toUpperCase() + k.slice(1)}</option>`).join('')}
-              </select>
             </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Timer Behavior</div>
-            ${[
-              { id: 'autoStartBreaks', label: 'Auto-Start Breaks', desc: 'Focus ends → break starts automatically', val: state.settings.autoStartBreaks },
-              { id: 'flowMode', label: 'Flow Mode', desc: 'Auto-continue through all cycles without intervention', val: state.settings.flowMode }
-            ].map(s => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
-              <div><div style="font-weight:500;font-size:13px">${s.label}</div><div style="font-size:11px;color:var(--text-muted)">${s.desc}</div></div>
-              <div style="width:44px;height:24px;border-radius:12px;background:${s.val ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('${s.id}')">
-                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${s.val ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+            <div class="stg-card">
+              <div class="stg-card-title">🔄 Timer Behavior</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Auto-Start Breaks</div><div class="stg-row-desc">Focus ends → break starts automatically</div></div>
+                ${toggleHTML('autoStartBreaks', state.settings.autoStartBreaks)}
               </div>
-            </div>`).join('')}
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Exam Countdown Display</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Choose how the countdown shows on each exam card</div>
-            <div class="exam-cd-toggle" style="margin:0">
-              ${[
-                { key:'full', label:'DD:HH:MM:SS' },
-                { key:'days', label:'Days' },
-                { key:'hours', label:'Hours' },
-                { key:'mins', label:'Mins' },
-                { key:'secs', label:'Secs' }
-              ].map(m => `<button class="exam-cd-btn ${state.examCountdownMode === m.key ? 'active' : ''}" onclick="ZoneApp.setCountdownMode('${m.key}')">${m.label}</button>`).join('')}
+              <div class="stg-row">
+                <div><div class="stg-row-label">Flow Mode</div><div class="stg-row-desc">Auto-continue through all cycles</div></div>
+                ${toggleHTML('flowMode', state.settings.flowMode)}
+              </div>
             </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Timer Preset</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
-              ${Object.entries(TIMER_PRESETS).filter(([k]) => k !== 'custom').map(([k, p]) => `<button onclick="ZoneApp.setSetting('timerPreset', '${k}')" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.timerPreset === k ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
-                <span style="font-size:13px;font-weight:600">${p.label}</span>
-                <span style="font-size:10px;color:var(--text-muted)">${p.focus}m focus · ${p.break}m break</span>
-              </button>`).join('')}
-            </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Theme</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
-              ${[
-                { id:'hacker', label:'Hacker', icon:'💚', desc:'Matrix green terminal' },
-                { id:'cyber', label:'Cyberpunk', icon:'💜', desc:'Neon purple cyan' },
-                { id:'midnight', label:'Midnight', icon:'💙', desc:'Glass deep blue' },
-                { id:'amber', label:'Amber', icon:'🧡', desc:'Warm amber glow' },
-                { id:'corporate', label:'Corporate', icon:'💼', desc:'Clean blue dark' },
-                { id:'platinum', label:'Platinum', icon:'✨', desc:'Premium gold/silver' }
-              ].map(t => `<button onclick="ZoneApp.setTheme('${t.id}')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--r-sm);cursor:pointer;background:${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--bg-2)'};border:1px solid ${state.settings.theme === t.id ? 'var(--accent-solve)' : 'var(--line)'};color:var(--text-primary);font-family:var(--mono);transition:all .15s;text-align:center">
-                <span style="font-size:24px;line-height:1">${t.icon}</span>
-                <span style="font-size:11px;font-weight:600">${t.label}</span>
-                <span style="font-size:9px;color:var(--text-muted);white-space:nowrap">${t.desc}</span>
-              </button>`).join('')}
-            </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Calendar</div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
-              <div><div style="font-weight:500;font-size:13px">Indian Holidays & Festivals</div><div style="font-size:11px;color:var(--text-muted)">Show default Indian calendar events</div></div>
-              <div style="width:44px;height:24px;border-radius:12px;background:${state.settings.showDefaultEvents ? 'var(--accent-solve)' : 'var(--bg-3)'};cursor:pointer;position:relative;transition:background .15s;border:1px solid var(--line)" onclick="ZoneApp.toggleSetting('showDefaultEvents')">
-                <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.settings.showDefaultEvents ? 'right:2px' : 'left:2px'};transition:left .15s,right .15s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+            <div class="stg-card">
+              <div class="stg-card-title">🔢 Countdown Display</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">How countdown shows on exam cards</div>
+              <div class="exam-cd-toggle" style="margin:0">
+                ${[
+                  { key:'full', label:'DD:HH:MM:SS' }, { key:'days', label:'Days' }, { key:'hours', label:'Hours' }, { key:'mins', label:'Mins' }, { key:'secs', label:'Secs' }
+                ].map(m => `<button class="exam-cd-btn ${state.examCountdownMode === m.key ? 'active' : ''}" onclick="ZoneApp.setCountdownMode('${m.key}')">${m.label}</button>`).join('')}
               </div>
             </div>
           </div>
-          ${state.isAdmin ? `
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:12px">🔑 Reset Keys for Users</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key to give to users so they can reset their password without the admin env password.</div>
-            <button class="ctl" onclick="ZoneApp.generateResetKey()" style="padding:8px 16px;font-size:11px">🎲 Generate Reset Key</button>
-            <div id="resetKeyDisplay" style="margin-top:10px;display:none">
-              <div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-bottom:4px">Share this key with the user:</div>
-              <div style="background:var(--bg-3);border:1px solid var(--accent-suc);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;color:var(--accent-suc);text-align:center;word-break:break-all" id="resetKeyValue"></div>
+
+          <!-- Notifications -->
+          <div class="stg-section" id="stg-notifications">
+            <div class="stg-card">
+              <div class="stg-card-title">🔔 Notifications & Sound</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Browser Notifications</div><div class="stg-row-desc">Get notified when blocks end</div></div>
+                ${toggleHTML('notifEnabled', state.settings.notifEnabled)}
+              </div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Sound Effects</div><div class="stg-row-desc">Play sounds on timer events</div></div>
+                ${toggleHTML('soundEnabled', state.settings.soundEnabled)}
+              </div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Quiet Mode</div><div class="stg-row-desc">Suppress non-critical notifications</div></div>
+                ${toggleHTML('quietMode', state.settings.quietMode)}
+              </div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Sound Pack</div><div class="stg-row-desc">Tone profile for timer events</div></div>
+                <select class="stg-select" onchange="ZoneApp.setSetting('soundPack', this.value)">
+                  ${Object.entries(SOUND_PACKS).map(([k, v]) => `<option value="${k}" ${state.settings.soundPack === k ? 'selected' : ''}>${v.label || k.charAt(0).toUpperCase() + k.slice(1)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Calendar -->
+          <div class="stg-section" id="stg-calendar">
+            <div class="stg-card">
+              <div class="stg-card-title">📅 Calendar</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Indian Holidays & Festivals</div><div class="stg-row-desc">Show default Indian calendar events</div></div>
+                ${toggleHTML('showDefaultEvents', state.settings.showDefaultEvents)}
+              </div>
+            </div>
+          </div>
+
+          <!-- Study Schedule -->
+          <div class="stg-section" id="stg-schedule">
+            <div class="stg-card" style="grid-column:1/-1">
+              <div class="stg-card-title">📚 Study Schedule</div>
+              <!-- Timeline preview -->
+              <div class="zt-timeline" id="ztTimeline">${_renderZoneTimeline()}</div>
+              <!-- Zone accordions -->
+              <div id="zaList">${_renderZoneAccordions()}</div>
+              <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <button class="ctl" onclick="ZoneApp.addZone()" style="padding:8px 18px;font-size:11px">+ Add Zone</button>
+                <button class="ctl primary" onclick="ZoneApp.saveZoneEdits()" style="padding:8px 18px;font-size:11px;font-weight:600">💾 Save Schedule</button>
+                <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">Changes apply after day reset</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Backup & Sync -->
+          <div class="stg-section" id="stg-backup">
+            <div id="ghSyncCardSlot"></div>
+          </div>
+
+          <!-- Data -->
+          <div class="stg-section" id="stg-data">
+            <div class="stg-card">
+              <div class="stg-card-title">📦 Data Management</div>
+              <div style="display:flex;flex-wrap:wrap;gap:10px">
+                <button class="ctl" onclick="ZoneApp.exportConfig()" style="padding:8px 16px;font-size:11px">⬇ Export Config</button>
+                <button class="ctl" onclick="ZoneApp.syncExport()" style="padding:8px 16px;font-size:11px">📦 Full Backup</button>
+                <button class="ctl" onclick="ZoneApp.syncImport()" style="padding:8px 16px;font-size:11px">📥 Restore Backup</button>
+                <button class="ctl" onclick="ZoneApp.clearStats()" style="padding:8px 16px;font-size:11px">🗑 Clear Stats</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Danger Zone -->
+          <div class="stg-section" id="stg-danger">
+            <div class="stg-card stg-danger">
+              <div class="stg-card-title">⚠️ Danger Zone</div>
+              <div class="stg-row">
+                <div><div class="stg-row-label">Reset All Data</div><div class="stg-row-desc">This will permanently delete all your data including zones, stats, events, and todos.</div></div>
+                <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin -->
+          ${state.isAdmin ? `<div class="stg-section" id="stg-admin">
+            <div class="stg-card">
+              <div class="stg-card-title">🔑 Reset Keys for Users</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key for users to reset their password.</div>
+              <button class="ctl" onclick="ZoneApp.generateResetKey()" style="padding:8px 16px;font-size:11px">🎲 Generate Reset Key</button>
+              <div id="resetKeyDisplay" style="margin-top:10px;display:none">
+                <div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-bottom:4px">Share this key:</div>
+                <div style="background:var(--bg-3);border:1px solid var(--accent-suc);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;color:var(--accent-suc);text-align:center;word-break:break-all" id="resetKeyValue"></div>
+              </div>
             </div>
           </div>` : ''}
-          <div class="settings-card" style="grid-column:1/-1">
-            <div class="field-label" style="margin-bottom:14px">Schedule Editor</div>
-            <div id="zoneEditorList">${renderZoneEditors()}</div>
-            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <button class="ctl" onclick="ZoneApp.addZone()" style="padding:8px 18px;font-size:11px">+ Add Zone</button>
-              <button class="ctl primary" onclick="ZoneApp.saveZoneEdits()" style="padding:8px 18px;font-size:11px;font-weight:600">💾 Save Schedule</button>
-              <span style="font-size:10px;color:var(--text-muted);font-family:var(--mono)">Changes apply after day reset</span>
-            </div>
-          </div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Data</div>
-            <div style="display:flex;flex-wrap:wrap;gap:10px">
-              <button class="ctl" onclick="ZoneApp.exportConfig()" style="padding:8px 16px;font-size:11px">⬇ Export Config</button>
-              <button class="ctl" onclick="ZoneApp.syncExport()" style="padding:8px 16px;font-size:11px">📦 Full Backup</button>
-              <button class="ctl" onclick="ZoneApp.syncImport()" style="padding:8px 16px;font-size:11px">📥 Restore Backup</button>
-              <button class="ctl" onclick="ZoneApp.clearStats()" style="padding:8px 16px;font-size:11px">🗑 Clear Stats</button>
-              <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
-            </div>
-          </div>
-          <div id="ghSyncCardSlot"></div>
-          <div class="settings-card">
-            <div class="field-label" style="margin-bottom:14px">Session</div>
-            <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:8px 16px;font-size:11px">🚪 Logout</button>
-          </div>
-        </div>`;
-    // Load GitHub sync status async (non-blocking)
+        </div>
+      </div>`;
+
+    // Load GitHub sync status async
     loadGitHubSyncStatus().then(() => {
       const slot = document.getElementById('ghSyncCardSlot');
       if (slot) slot.innerHTML = renderGitHubSyncCard();
     });
+  }
+
+  function _stgNav(id, btn) {
+    document.querySelectorAll('.stg-nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.stg-section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    const el = document.getElementById('stg-' + id);
+    if (el) el.classList.add('active');
+    // Load GitHub sync when navigating to backup
+    if (id === 'backup') {
+      loadGitHubSyncStatus().then(() => {
+        const slot = document.getElementById('ghSyncCardSlot');
+        if (slot) slot.innerHTML = renderGitHubSyncCard();
+      });
+    }
+  }
+
+  function _stgToggle(key) {
+    state.settings[key] = !state.settings[key];
+    storage().set('settings', state.settings);
+    if (!isGuest()) saveUserDataToServer('settings');
+    _stgSaved();
+    renderTabBody();
+  }
+
+  function _stgSaved() {
+    const t = document.createElement('div');
+    t.className = 'stg-saved-toast';
+    t.textContent = '✔ Saved';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 1500);
+  }
+
+  function _renderZoneTimeline() {
+    const zones = getZones();
+    if (!zones.length) return '<div style="font-size:12px;color:var(--text-muted);padding:8px">No zones configured</div>';
+    return zones.map(z => `<div class="zt-item">
+      <span class="zt-dot" style="background:${z.color}"></span>
+      <span style="min-width:44px;text-align:right">${z.startTime || '--:--'}</span>
+      <div class="zt-bar" style="background:${z.color};opacity:0.4"></div>
+      <span style="min-width:44px">${z.endTime || '--:--'}</span>
+      <span class="zt-name">${esc(z.title)}</span>
+    </div>`).join('');
+  }
+
+  function _renderZoneAccordions() {
+    const zones = getZones();
+    return zones.map((z, i) => `<div class="za-item" id="za-${i}">
+      <button class="za-header" onclick="ZoneApp._zaToggle(${i})">
+        <span class="za-color-dot" style="background:${z.color}"></span>
+        <span class="za-name">${esc(z.title)}</span>
+        <span class="za-time">${z.startTime || '--:--'} — ${z.endTime || '--:--'}</span>
+        <span class="za-chevron">▼</span>
+      </button>
+      <div class="za-body">
+        <div class="za-grid">
+          <div class="za-field"><label>Title</label><input class="stg-input" type="text" id="zaTitle${i}" value="${esc(z.title)}"></div>
+          <div class="za-field"><label>Subtitle</label><input class="stg-input" type="text" id="zaSub${i}" value="${esc(z.subtitle || '')}"></div>
+          <div class="za-field"><label>Color</label><input class="stg-input" type="color" id="zaColor${i}" value="${z.color}" style="height:36px;padding:4px"></div>
+          <div class="za-field"><label>Type</label><select class="stg-select" id="zaType${i}" style="width:100%"><option value="focus" ${z.type==='focus'?'selected':''}>Focus</option><option value="review" ${z.type==='review'?'selected':''}>Review</option><option value="buffer" ${z.type==='buffer'?'selected':''}>Buffer</option></select></div>
+          <div class="za-field"><label>Focus (min)</label><input class="stg-input" type="number" id="zaFocus${i}" value="${z.focusDuration||25}" min="5" max="120"></div>
+          <div class="za-field"><label>Short Break (min)</label><input class="stg-input" type="number" id="zaBreak${i}" value="${z.breakDuration||5}" min="1" max="30"></div>
+          <div class="za-field"><label>Long Break (min)</label><input class="stg-input" type="number" id="zaLBreak${i}" value="${z.longBreakDuration||20}" min="5" max="60"></div>
+          <div class="za-field"><label>Long Break Every</label><input class="stg-input" type="number" id="zaCBC${i}" value="${z.cyclesBeforeLongBreak||5}" min="2" max="10"><span style="font-size:10px;color:var(--text-muted)">cycles</span></div>
+          <div class="za-field"><label>Max Cycles</label><input class="stg-input" type="number" id="zaTC${i}" value="${z.totalCycles||4}" min="1" max="20"></div>
+          <div class="za-field"><label>Max Time (min)</label><input class="stg-input" type="number" id="zaTL${i}" value="${z.timeLimit||180}" min="30" max="600"></div>
+          <div class="za-field"><label>Start Time</label><input class="stg-input" type="time" id="zaStart${i}" value="${z.startTime||''}"></div>
+          <div class="za-field"><label>End Time</label><input class="stg-input" type="time" id="zaEnd${i}" value="${z.endTime||''}"></div>
+        </div>
+      </div>
+    </div>`).join('');
+  }
+
+  function _zaToggle(i) {
+    const el = document.getElementById('za-' + i);
+    if (el) el.classList.toggle('open');
   }
 
   function editTitleInline() {
@@ -4655,6 +4793,7 @@ const ZoneApp = (() => {
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset,
     loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
+    _stgNav, _stgToggle, _stgSaved, _zaToggle,
     _ctx: { state, getZones, esc, todayKey, storage, toast, timerStart }
   };
 })();
