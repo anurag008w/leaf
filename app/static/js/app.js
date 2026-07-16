@@ -534,11 +534,15 @@ const ZoneApp = (() => {
     const zones = getZones();
     const zoneLookup = (idx) => zones[idx] || { focusDuration: 25 };
 
+    // Compute zone data — always filter to the relevant date only (today or time-travel date)
+    const targetDate = cutoffDate || today;
+    const dayLog = log.filter(e => e.date === targetDate);
+
     const sessionsToday = todayEvents.filter(e => e.type === 'session_complete').length;
     const skipsToday = todayEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
 
     // Track which zones had timer sessions per day (to avoid double-counting zone_complete)
-    const zonesWithTimerToday = new Set(todayEvents.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
+    const zonesWithTimerToday = new Set(dayLog.filter(e => e.type === 'session_complete').map(e => e.zoneIdx));
 
     const manualToday = todayEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
     const focusMinToday = todayEvents.filter(e => e.type === 'session_complete')
@@ -619,26 +623,18 @@ const ZoneApp = (() => {
       streak++;
     }
 
-    // Compute zone data — when in time travel, derive from filtered log only
+    // Compute zone data — always filter to the relevant date only (today or time-travel date)
     let zoneData;
-    if (cutoffDate) {
-      zoneData = zones.map((z, i) => {
-        const zoneEvents = filteredLog.filter(e => e.zoneIdx === i);
-        const sessions = zoneEvents.filter(e => e.type === 'session_complete').length;
-        const skips = zoneEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
-        const pauses = zoneEvents.filter(e => e.type === 'pause').length;
-        const totalMin = zoneEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
-        const completes = zoneEvents.filter(e => e.type === 'zone_complete' && zonesWithTimerToday.has(i)).length;
-        const doneNoTimer = zoneEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
-        return { ...z, idx: i, sessions, skips, pauses, totalMin, completes, doneNoTimer };
-      });
-    } else {
-      const zoneStats = state.tracking.zoneStats || {};
-      zoneData = zones.map((z, i) => ({
-        ...z, idx: i,
-        ...(zoneStats[i] || { sessions: 0, skips: 0, pauses: 0, totalMin: 0, completes: 0, doneNoTimer: 0 })
-      }));
-    }
+    zoneData = zones.map((z, i) => {
+      const zoneEvents = dayLog.filter(e => e.zoneIdx === i);
+      const sessions = zoneEvents.filter(e => e.type === 'session_complete').length;
+      const skips = zoneEvents.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+      const pauses = zoneEvents.filter(e => e.type === 'pause').length;
+      const totalMin = zoneEvents.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+      const completes = zoneEvents.filter(e => e.type === 'zone_complete' && zonesWithTimerToday.has(i)).length;
+      const doneNoTimer = zoneEvents.filter(e => e.type === 'zone_complete' && !zonesWithTimerToday.has(e.zoneIdx)).length;
+      return { ...z, idx: i, sessions, skips, pauses, totalMin, completes, doneNoTimer };
+    });
 
     // Merge daily zone completion snapshots into dailyMap
     const dz = state.tracking.dailyZones || {};
@@ -2886,10 +2882,10 @@ const ZoneApp = (() => {
 
     function ringSVG(target) {
       const diff = target - now;
+      if (diff <= 0) return '';
       const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-      const start = target - ONE_YEAR;
-      const total = target - start;
-      const frac = diff > 0 ? Math.min(1, Math.max(0, 1 - diff / total)) : 1;
+      // Depleting ring: full when lots of time left, empties as exam approaches
+      const frac = Math.min(1, diff / ONE_YEAR);
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -3005,9 +3001,8 @@ const ZoneApp = (() => {
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
         const ONE_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-        const start = target - ONE_YEAR;
-        const total = target - start;
-        const frac = diff > 0 ? Math.min(1, Math.max(0, 1 - diff / total)) : 1;
+        // Depleting ring: full when lots of time left, empties as exam approaches
+        const frac = Math.min(1, diff / ONE_YEAR);
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
