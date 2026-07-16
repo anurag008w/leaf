@@ -24,14 +24,17 @@ _APP_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _APP_DIR.parent
 DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(_PROJECT_ROOT / "data")))
 
+# ── Fingerprint cache for smart auto-push ──────────
+_last_push_fingerprint: str = ""
+
 REPO_NAME = os.environ.get("GITHUB_REPO", "").strip() or "zone-data-backup"
 GITHUB_SYNC_ENABLED = os.environ.get("GITHUB_SYNC_ENABLED", "").strip().lower()
 GH_TOKEN = os.environ.get("GH_TOKEN", "").strip()
 
 try:
-    GITHUB_SYNC_INTERVAL = max(60, int(os.environ.get("GITHUB_SYNC_INTERVAL", "300") or "300"))
+    GITHUB_SYNC_INTERVAL = max(30, int(os.environ.get("GITHUB_SYNC_INTERVAL", "40") or "40"))
 except (ValueError, TypeError):
-    GITHUB_SYNC_INTERVAL = 300  # 5 minutes
+    GITHUB_SYNC_INTERVAL = 40  # 40 seconds
 
 
 # ── Environment Detection ──────────────────────────
@@ -62,6 +65,40 @@ def _run(cmd: list[str], check: bool = False, capture: bool = True, timeout: int
         return subprocess.CompletedProcess(cmd, returncode=127, stdout="", stderr="command not found")
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="timeout")
+
+
+def compute_fingerprint() -> str:
+    """Compute a fingerprint of the data dir contents (file names + mtimes + sizes)."""
+    import hashlib
+    h = hashlib.md5()
+    if not DATA_DIR.exists():
+        return ""
+    for f in sorted(DATA_DIR.rglob("*")):
+        if f.is_file():
+            rel = str(f.relative_to(DATA_DIR))
+            h.update(rel.encode())
+            try:
+                stat = f.stat()
+                h.update(str(stat.st_mtime_ns).encode())
+                h.update(str(stat.st_size).encode())
+            except OSError:
+                pass
+    return h.hexdigest()
+
+
+def has_data_changed() -> bool:
+    """Check if data dir has changed since last push. Returns True if changed."""
+    global _last_push_fingerprint
+    fp = compute_fingerprint()
+    if fp == _last_push_fingerprint:
+        return False
+    return True
+
+
+def mark_pushed():
+    """Mark current fingerprint as pushed (called after successful push)."""
+    global _last_push_fingerprint
+    _last_push_fingerprint = compute_fingerprint()
 
 
 def detect_environment() -> EnvStatus:
@@ -232,7 +269,21 @@ def _git_init_and_push(data_path: Path, repo_url: str, username: str, force_mode
         push_cmd = ["git", "push", "-u", "origin", "main"]
         if push_flag:
             push_cmd.append(push_flag)
-        r = _run(push_cmd, cwd=str(tmp_path), check=True)
+        r = _run(push_cmd, cwd=str(tmp_path))
+
+        # Auto-retry: if normal push rejected (diverged), fall back to force-with-lease
+        if r.returncode != 0 and force_mode == "normal":
+            stderr = r.stderr or ""
+            rejected_keywords = ["rejected", "diverged", "failed to push", "non-fast-forward", "updates were rejected"]
+            if any(kw in stderr.lower() for kw in rejected_keywords):
+                log.warning("normal push rejected, auto-retrying with force-with-lease: %s", stderr.strip())
+                fallback_cmd = ["git", "push", "-u", "origin", "main", "--force-with-lease"]
+                r = _run(fallback_cmd, cwd=str(tmp_path))
+                if r.returncode != 0:
+                    raise RuntimeError(f"Force-with-lease retry also failed: {r.stderr}")
+                log.info("pushed (force-with-lease fallback) to %s", repo_url)
+                return
+
         if r.returncode != 0:
             raise RuntimeError(f"Push failed ({force_mode}): {r.stderr}")
         log.info("pushed (%s) to %s", force_mode, repo_url)

@@ -419,16 +419,20 @@ async def _sync_loop():
         await asyncio.sleep(SYNC_INTERVAL)
 
 async def _gh_sync_loop():
-    """Auto-push data to GitHub periodically."""
-    await asyncio.sleep(60)  # initial delay
+    """Auto-push data to GitHub every 40 seconds (only if data changed)."""
+    await asyncio.sleep(30)  # initial delay
     while True:
         try:
             if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
-                result = await asyncio.to_thread(github_sync.push_data)
-                if result.success:
-                    log.info("GitHub auto-sync: %s", result.message)
+                if github_sync.has_data_changed():
+                    result = await asyncio.to_thread(github_sync.push_data)
+                    if result.success:
+                        github_sync.mark_pushed()
+                        log.info("GitHub auto-sync: %s", result.message)
+                    else:
+                        log.warning("GitHub auto-sync failed: %s", result.message)
                 else:
-                    log.warning("GitHub auto-sync failed: %s", result.message)
+                    log.debug("GitHub auto-sync: no changes detected, skipping")
         except Exception as exc:
             log.warning("GitHub auto-sync error: %s", exc)
         await asyncio.sleep(github_sync.GITHUB_SYNC_INTERVAL)
@@ -997,6 +1001,7 @@ async def sync_screen_push(request: Request):
         mode = "normal"
     result = await asyncio.to_thread(github_sync.push_data, force_mode=mode)
     if result.success:
+        github_sync.mark_pushed()
         _server_restarted = False
     return {"success": result.success, "message": result.message,
             "direction": result.direction, "repo_url": result.repo_url,
@@ -1012,6 +1017,7 @@ async def sync_screen_pull(request: Request):
         mode = "normal"
     result = await asyncio.to_thread(github_sync.pull_data, force_mode=mode)
     if result.success:
+        github_sync.mark_pushed()
         _server_restarted = False
         # Reload sessions after pull
         load_sessions()
@@ -1048,6 +1054,8 @@ async def github_sync_push(request: Request):
     if mode not in ("normal", "force", "force-with-lease"):
         mode = "normal"
     result = await asyncio.to_thread(github_sync.push_data, force_mode=mode)
+    if result.success:
+        github_sync.mark_pushed()
     return {"success": result.success, "message": result.message,
             "direction": result.direction, "repo_url": result.repo_url,
             "files_affected": result.files_affected}
@@ -1062,6 +1070,8 @@ async def github_sync_pull(request: Request):
     if mode not in ("normal", "force", "force-with-lease"):
         mode = "normal"
     result = await asyncio.to_thread(github_sync.pull_data, force_mode=mode)
+    if result.success:
+        github_sync.mark_pushed()
     return {"success": result.success, "message": result.message,
             "direction": result.direction, "repo_url": result.repo_url,
             "files_affected": result.files_affected}
