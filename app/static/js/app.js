@@ -964,7 +964,12 @@ const ZoneApp = (() => {
       zs.total = (z.focusDuration || 25) * 60;
       zs.elapsed = 0;
       renderAll();
-      if (state.settings.flowMode) timerStart();
+      // Show cycle checklist — next focus starts when user clicks CONTINUE
+      if (ZoneApp.openCycleChecklist) {
+        ZoneApp.openCycleChecklist(state.currentZoneIdx, zs.cycle, z.title);
+      } else if (state.settings.flowMode) {
+        timerStart();
+      }
     }
   }
 
@@ -981,6 +986,11 @@ const ZoneApp = (() => {
     if (next >= getZones().length) { renderAll(); return; }
     confetti();
     notifSend('Zone Complete!', `Zone ${state.currentZoneIdx + 1} finished.`);
+    // Show zone checklist — next zone starts when user clicks CONTINUE
+    if (ZoneApp.openZoneChecklist) {
+      ZoneApp.openZoneChecklist(state.currentZoneIdx, z?.title);
+    }
+    // Advance to next zone (checklist is non-blocking overlay)
     if (!state.byZone[next]) state.byZone[next] = initZoneState(getZone(next), next);
     state.currentZoneIdx = next;
     renderAll();
@@ -4574,7 +4584,7 @@ const ZoneApp = (() => {
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset,
     loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
-    _ctx: { state, getZones, esc, todayKey, storage, toast }
+    _ctx: { state, getZones, esc, todayKey, storage, toast, timerStart }
   };
 })();
 

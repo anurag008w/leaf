@@ -264,6 +264,109 @@
     </div>`;
   }
 
+  /* ── Cycle/Zone Completion Checklist (Neon Glow) ────── */
+  function openCycleChecklist(zoneIdx, cycle, zoneName) {
+    const zones = getZones();
+    const allTodos = todos();
+    const travelDate = todayKey();
+    const tasks = allTodos.filter(t =>
+      t.zoneIdx === zoneIdx &&
+      (t.cycle === cycle || t.cycle === -1) &&
+      t.created === travelDate
+    );
+    _renderChecklistModal(tasks, zones, zoneIdx, cycle, zoneName, 'cycle');
+  }
+
+  function openZoneChecklist(zoneIdx, zoneName) {
+    const zones = getZones();
+    const allTodos = todos();
+    const travelDate = todayKey();
+    const tasks = allTodos.filter(t =>
+      t.zoneIdx === zoneIdx &&
+      t.created === travelDate
+    );
+    _renderChecklistModal(tasks, zones, zoneIdx, -1, zoneName, 'zone');
+  }
+
+  function _renderChecklistModal(tasks, zones, zoneIdx, cycle, zoneName, mode) {
+    const old = document.getElementById('clChecklistModal');
+    if (old) old.remove();
+
+    const z = zones[zoneIdx];
+    const doneCount = tasks.filter(t => t.done).length;
+    const zoneLabel = z ? `Z${String(z.id ?? zoneIdx + 1).padStart(2, '0')} ${esc(zoneName || z.title)}` : esc(zoneName || 'Zone');
+    const cycleLabel = mode === 'cycle' ? `Cycle ${cycle + 1}` : 'All Tasks';
+    const title = mode === 'cycle' ? 'CYCLE CHECKLIST' : 'ZONE CHECKLIST';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cl-overlay';
+    overlay.id = 'clChecklistModal';
+    overlay.innerHTML = `
+      <div class="cl-card">
+        <div class="cl-header">
+          <div class="cl-title-group">
+            <span class="cl-title"><span class="cl-title-icon">⚡</span> ${title}</span>
+            <div class="cl-subtitle">
+              <span class="cl-zone-tag">${zoneLabel}</span>
+              <span class="cl-cycle-tag">${cycleLabel}</span>
+            </div>
+          </div>
+          <button class="cl-close" onclick="ZoneApp._clClose()">✕</button>
+        </div>
+        <div class="cl-tasks" id="clTaskList">
+          ${tasks.length === 0 ? `
+            <div class="cl-empty">
+              <span class="cl-empty-icon">📝</span>
+              <span class="cl-empty-text">No tasks assigned to this ${mode === 'cycle' ? 'cycle' : 'zone'}</span>
+            </div>
+          ` : tasks.map(t => `
+            <div class="cl-task ${t.done ? 'done' : ''}" data-id="${t.id}" onclick="ZoneApp._clToggle('${t.id}')">
+              <div class="cl-check"><span class="cl-check-icon">✓</span></div>
+              <span class="cl-task-text">${esc(t.text)}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="cl-footer">
+          <span class="cl-progress">
+            <span class="cl-done-count">${doneCount}</span>
+            <span class="cl-total-count"> / ${tasks.length} tasks</span>
+          </span>
+          <button class="cl-done-btn" onclick="ZoneApp._clClose()">CONTINUE →</button>
+        </div>
+      </div>`;
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) ZoneApp._clClose(); });
+    document.body.appendChild(overlay);
+  }
+
+  function _clToggle(id) {
+    const t = todos().find(x => x.id === id);
+    if (!t) return;
+    t.done = !t.done;
+    saveTodos();
+    const el = document.querySelector(`.cl-task[data-id="${id}"]`);
+    if (el) el.classList.toggle('done', t.done);
+    const tasks = document.querySelectorAll('.cl-task');
+    const doneC = document.querySelector('.cl-done-count');
+    if (doneC) {
+      let cnt = 0;
+      tasks.forEach(t2 => { if (t2.classList.contains('done')) cnt++; });
+      doneC.textContent = cnt;
+    }
+  }
+
+  function _clClose() {
+    const m = document.getElementById('clChecklistModal');
+    if (m) m.remove();
+    // After dismissing checklist, auto-start next focus if flowMode is on
+    try {
+      const s = ctx().state;
+      if (s && s.settings && s.settings.flowMode) {
+        ctx().timerStart();
+      }
+    } catch {}
+  }
+
   /* ── Public API ───────────────────────────────────────── */
   ZoneApp._tlOpenAdd = function () { openAddModal(); };
 
@@ -318,6 +421,12 @@
     }
     sel.innerHTML = html;
   };
+
+  /* ── Checklist exports (called from app.js) ──────────── */
+  ZoneApp.openCycleChecklist = openCycleChecklist;
+  ZoneApp.openZoneChecklist = openZoneChecklist;
+  ZoneApp._clToggle = _clToggle;
+  ZoneApp._clClose = _clClose;
 
   ZoneApp.renderTodoTab = renderTodoTab;
 })();
