@@ -877,6 +877,71 @@ const ZoneApp = (() => {
     }
   }
 
+  /* ── Session Done — complete current focus, advance cycle (not zone) ── */
+  function sessionDone() {
+    if (state.selectedDate) { toast('⏳ Exit time travel mode first', 'warn'); return; }
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z || !zs) return;
+
+    const dur = z.focusDuration || 25;
+    logEvent('session_complete', { zoneIdx: state.currentZoneIdx, duration: dur, cycle: zs.cycle, skipped: false });
+    chime('complete');
+    toast(`Session ${zs.cycle + 1} done!`, 'success');
+    state.stats.totalSessions++;
+    state.stats.totalFocusMin += dur;
+    const key = todayKey();
+    if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+    state.stats.history[key].focusMin += dur;
+    state.stats.history[key].sessions++;
+    saveState();
+
+    // Advance cycle
+    stopTimer();
+    zs.running = false;
+    zs.blockComplete = false;
+    zs.overtimeSeconds = 0;
+    zs.remaining = 0;
+    zs.cycle++;
+    zs.blockType = 'focus';
+    const maxCycles = z.totalCycles || 4;
+    if (zs.cycle >= maxCycles) {
+      completeZone();
+      return;
+    }
+    zs.remaining = dur * 60;
+    zs.total = dur * 60;
+    zs.elapsed = 0;
+    renderAll();
+    // Show checklist for this completed cycle
+    if (ZoneApp.openCycleChecklist) {
+      ZoneApp.openCycleChecklist(state.currentZoneIdx, zs.cycle - 1, z.title);
+    }
+  }
+
+  /* ── Zone Skip — skip entire zone to next ── */
+  function zoneSkip() {
+    if (state.selectedDate) { toast('⏳ Exit time travel mode first', 'warn'); return; }
+    const z = getZone(state.currentZoneIdx);
+    const zs = getCurrentZs();
+    if (!z) return;
+
+    if (!confirm(`Skip zone "${z.title}"?`)) return;
+
+    logEvent('skip_zone', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
+    toast(`Zone ${z.title} skipped`, 'info');
+    stopTimer();
+    if (zs) { zs.running = false; zs.completed = true; zs.blockComplete = false; zs.overtimeSeconds = 0; }
+    saveState();
+
+    const next = state.currentZoneIdx + 1;
+    if (getZones().every((_, i) => state.byZone[i]?.completed)) { finishDay(); return; }
+    if (next >= getZones().length) { renderAll(); return; }
+    if (!state.byZone[next]) state.byZone[next] = initZoneState(getZone(next), next);
+    state.currentZoneIdx = next;
+    renderAll();
+  }
+
   function takeBreak() {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
@@ -1743,14 +1808,14 @@ const ZoneApp = (() => {
       const nextIdx = state.currentZoneIdx + 1;
       c.innerHTML = `
         <button class="ctl" onclick="ZoneApp.resetZone(${state.currentZoneIdx})"><span class="ctl-icon">↺</span> RESET</button>
-        ${nextIdx < getZones().length ? `<button class="ctl" onclick="ZoneApp.selectZone(${nextIdx})"><span class="ctl-icon">⏩</span> SKIP</button>` : ''}`;
+        ${nextIdx < getZones().length ? `<button class="ctl" onclick="ZoneApp.selectZone(${nextIdx})"><span class="ctl-icon">⏩</span> NEXT</button>` : ''}`;
       return;
     }
     if (zs?.blockComplete) {
       c.innerHTML = `
         <button class="ctl primary big" onclick="ZoneApp.takeBreak()"><span class="ctl-icon">⏸</span> TAKE BREAK</button>
-        <button class="ctl" onclick="ZoneApp.timerToggle()"><span class="ctl-icon">⏸</span> PAUSE/RESUME</button>
-        <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx})"><span class="ctl-icon">✓</span> DONE</button>`;
+        <button class="ctl" onclick="ZoneApp.sessionDone()"><span class="ctl-icon">✓</span> SESSION DONE</button>
+        <button class="ctl" onclick="ZoneApp.zoneSkip()"><span class="ctl-icon">⏭</span> ZONE SKIP</button>`;
       return;
     }
     c.innerHTML = `
@@ -1759,9 +1824,9 @@ const ZoneApp = (() => {
         ${zs?.running ? 'PAUSE' : 'START'}
         <kbd class="ctl-kbd">SPACE</kbd>
       </button>
-      <button class="ctl" onclick="ZoneApp.timerSkip()"><span class="ctl-icon">⏭</span> SKIP</button>
-      <button class="ctl" onclick="ZoneApp.timerReset()"><span class="ctl-icon">↺</span> RESET</button>
-      <button class="ctl" onclick="ZoneApp.markZoneComplete(${state.currentZoneIdx})"><span class="ctl-icon">✓</span> DONE</button>`;
+      <button class="ctl" onclick="ZoneApp.sessionDone()"><span class="ctl-icon">✓</span> SESSION DONE</button>
+      <button class="ctl" onclick="ZoneApp.zoneSkip()"><span class="ctl-icon">⏭</span> ZONE SKIP</button>
+      <button class="ctl" onclick="ZoneApp.timerReset()"><span class="ctl-icon">↺</span> RESET</button>`;
   }
 
   function timerToggle() {
@@ -4566,6 +4631,7 @@ const ZoneApp = (() => {
     init, render, renderTabBody,
     switchTab, selectZone, jumpToCycle,
     timerToggle, timerStart, timerPause, timerSkip, timerReset,
+    sessionDone, zoneSkip,
     markZoneComplete, resetZone, resetDay,
     continueDay, continueSkippedZone, showContinueOptions,
     toast,
