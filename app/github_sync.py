@@ -48,11 +48,11 @@ class EnvStatus:
     data_dir_path: str = ""
 
 
-def _run(cmd: list[str], check: bool = False, capture: bool = True, timeout: int = 30) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], check: bool = False, capture: bool = True, timeout: int = 30, cwd: str | None = None) -> subprocess.CompletedProcess:
     """Run a command safely with timeout."""
     try:
         result = subprocess.run(
-            cmd, capture_output=capture, text=True, timeout=timeout
+            cmd, capture_output=capture, text=True, timeout=timeout, cwd=cwd
         )
         if check and result.returncode != 0:
             raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
