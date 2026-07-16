@@ -600,7 +600,27 @@ async def generate_reset_key(request: Request):
     keys = load_reset_keys()
     keys.append(key)
     save_reset_keys(keys)
-    return {"key": key, "note": "Share this key with users so they can reset their passwords."}
+    return {"key": key, "keys": keys, "note": "Share this key with users so they can reset their passwords."}
+
+@app.get("/api/admin/reset-keys")
+async def list_reset_keys(request: Request):
+    uname = getattr(request.state, "username", None)
+    if uname != ZONE_USERNAME:
+        raise HTTPException(403, "only admin can view reset keys")
+    return {"keys": load_reset_keys()}
+
+class DeleteResetKeyBody(BaseModel):
+    key: str
+
+@app.post("/api/admin/delete-reset-key")
+async def delete_reset_key(body: DeleteResetKeyBody, request: Request):
+    uname = getattr(request.state, "username", None)
+    if uname != ZONE_USERNAME:
+        raise HTTPException(403, "only admin can delete reset keys")
+    keys = load_reset_keys()
+    keys = [k for k in keys if not secrets.compare_digest(body.key, k)]
+    save_reset_keys(keys)
+    return {"keys": keys, "status": "ok"}
 
 @app.get("/api/auth-check")
 async def auth_check(request: Request):

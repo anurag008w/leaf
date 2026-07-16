@@ -3487,12 +3487,13 @@ const ZoneApp = (() => {
           ${state.isAdmin ? `<div class="stg-section" id="stg-admin">
             <div class="stg-card">
               <div class="stg-card-title">🔑 Reset Keys for Users</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key for users to reset their password.</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key for users to reset their password. Keys persist across restarts.</div>
               <button class="ctl" onclick="ZoneApp.generateResetKey()" style="padding:8px 16px;font-size:11px">🎲 Generate Reset Key</button>
               <div id="resetKeyDisplay" style="margin-top:10px;display:none">
-                <div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-bottom:4px">Share this key:</div>
+                <div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);margin-bottom:4px">New key generated:</div>
                 <div style="background:var(--bg-3);border:1px solid var(--accent-suc);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;color:var(--accent-suc);text-align:center;word-break:break-all" id="resetKeyValue"></div>
               </div>
+              <div id="resetKeysList" style="margin-top:12px"></div>
             </div>
           </div>` : ''}
         </div>
@@ -3503,6 +3504,8 @@ const ZoneApp = (() => {
       const slot = document.getElementById('ghSyncCardSlot');
       if (slot) slot.innerHTML = renderGitHubSyncCard();
     });
+    // Load existing reset keys for admin
+    if (state.isAdmin) loadResetKeys();
   }
 
   function _stgNav(id, btn) {
@@ -4309,7 +4312,38 @@ const ZoneApp = (() => {
       if (val) val.textContent = r.key;
       if (dsp) dsp.style.display = 'block';
       toast('Reset key generated! Share it with the user.', 'success');
+      // Refresh the keys list
+      loadResetKeys();
     } catch { toast('Failed to generate key', 'error'); }
+  }
+
+  async function loadResetKeys() {
+    const list = document.getElementById('resetKeysList');
+    if (!list) return;
+    try {
+      const r = await fetchJSON('/api/admin/reset-keys');
+      const keys = r.keys || [];
+      if (keys.length === 0) {
+        list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-style:italic">No active reset keys</div>';
+        return;
+      }
+      list.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">Active keys (' + keys.length + '):</div>' +
+        keys.map(k => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;background:var(--bg-3);border:1px solid var(--line-soft);border-radius:8px;padding:8px 12px">
+            <span style="flex:1;font-family:var(--mono);font-size:12px;color:var(--accent-suc);word-break:break-all">${k}</span>
+            <button class="ctl" onclick="ZoneApp.deleteResetKey('${k}')" style="padding:4px 10px;font-size:10px;color:var(--accent-warn);border-color:var(--accent-warn);flex-shrink:0">🗑 Delete</button>
+          </div>
+        `).join('');
+    } catch { list.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">Failed to load keys</div>'; }
+  }
+
+  async function deleteResetKey(key) {
+    if (!confirm('Delete this reset key? The user won\'t be able to use it anymore.')) return;
+    try {
+      await fetchJSON('/api/admin/delete-reset-key', { method: 'POST', body: { key } });
+      toast('Reset key deleted', 'success');
+      loadResetKeys();
+    } catch { toast('Failed to delete key', 'error'); }
   }
 
   async function syncExport() {
@@ -4857,7 +4891,7 @@ const ZoneApp = (() => {
     exportEvents, importEvents, exportConfig, importConfig,
     toggleSetting, clearStats, resetAll, logout,
     syncExport, syncImport,
-    saveGoalName, editTitleInline, generateResetKey,
+    saveGoalName, editTitleInline, generateResetKey, loadResetKeys, deleteResetKey,
     changePassword, changeUsername,
     onZoneTypeChange, recalcHint, syncCycleNames, saveZoneEdits, removeZone, addZone,
     selectWpStyle, setWpSize, downloadWallpaper, buildPoster,
