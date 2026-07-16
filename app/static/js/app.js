@@ -3521,7 +3521,7 @@ const ZoneApp = (() => {
       </button>
       <div class="za-body">
         <div class="za-grid">
-          <div class="za-field"><label>Title</label><input class="stg-input" type="text" id="ze-${i}-title" value="${esc(z.title)}"></div>
+          <div class="za-field"><label>Title</label><input class="stg-input" type="text" id="ze-${i}-title" value="${esc(z.title)}" oninput="document.querySelector('#za-${i} .za-name').textContent=this.value||'Zone ${i+1}'"></div>
           <div class="za-field"><label>Subtitle</label><input class="stg-input" type="text" id="ze-${i}-sub" value="${esc(z.subtitle || '')}"></div>
           <div class="za-field"><label>Color</label><input class="stg-input" type="color" id="ze-${i}-color" value="${z.color}" style="height:36px;padding:4px"></div>
           <div class="za-field"><label>Type</label><select class="stg-select" id="ze-${i}-type" style="width:100%" onchange="ZoneApp.onZoneTypeChange(${i})"><option value="focus" ${z.type==='focus'?'selected':''}>Focus</option><option value="review" ${z.type==='review'?'selected':''}>Review</option><option value="buffer" ${z.type==='buffer'?'selected':''}>Buffer</option></select></div>
@@ -3531,8 +3531,8 @@ const ZoneApp = (() => {
           <div class="za-field"><label>Long Break Every</label><input class="stg-input" type="number" id="ze-${i}-lb-cycle" value="${z.cyclesBeforeLongBreak||5}" min="2" max="10" oninput="ZoneApp.recalcHint(${i})"><span style="font-size:10px;color:var(--text-muted)">cycles</span></div>
           <div class="za-field"><label>Max Cycles</label><input class="stg-input" type="number" id="ze-${i}-cycles" value="${z.totalCycles||4}" min="1" max="20" oninput="ZoneApp.recalcHint(${i});ZoneApp.syncCycleNames(${i})"></div>
           <div class="za-field"><label>Max Time (min)</label><input class="stg-input" type="number" id="ze-${i}-tlim" value="${z.timeLimit||180}" min="30" max="600" oninput="ZoneApp.recalcHint(${i})"><div id="ze-${i}-tl-v" style="font-size:10px;color:var(--text-muted)">${z.timeLimit||180} min</div></div>
-          <div class="za-field"><label>Start Time</label><input class="stg-input" type="time" id="ze-${i}-start" value="${z.startTime||''}"></div>
-          <div class="za-field"><label>End Time</label><input class="stg-input" type="time" id="ze-${i}-end" value="${z.endTime||''}"></div>
+          <div class="za-field"><label>Start Time</label><input class="stg-input" type="time" id="ze-${i}-start" value="${z.startTime||''}" oninput="ZoneApp._zaSyncTimeline(${i})"></div>
+          <div class="za-field"><label>End Time</label><input class="stg-input" type="time" id="ze-${i}-end" value="${z.endTime||''}" oninput="ZoneApp._zaSyncTimeline(${i})"></div>
         </div>
         <!-- Recalc hint -->
         <div id="ze-${i}-hint" style="margin-top:10px;font-size:11px;color:var(--text-muted)"></div>
@@ -3547,6 +3547,20 @@ const ZoneApp = (() => {
   function _zaToggle(i) {
     const el = document.getElementById('za-' + i);
     if (el) el.classList.toggle('open');
+  }
+
+  function _zaSyncTimeline(i) {
+    // Sync header time display
+    const start = document.getElementById(`ze-${i}-start`)?.value || '--:--';
+    const end = document.getElementById(`ze-${i}-end`)?.value || '--:--';
+    const el = document.getElementById(`za-${i}`);
+    if (el) {
+      const timeEl = el.querySelector('.za-time');
+      if (timeEl) timeEl.textContent = `${start} — ${end}`;
+    }
+    // Sync timeline bar
+    const tlEl = document.getElementById('ztTimeline');
+    if (tlEl) tlEl.innerHTML = _renderZoneTimeline();
   }
 
   function editTitleInline() {
@@ -4802,7 +4816,7 @@ const ZoneApp = (() => {
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset,
     loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
-    _stgNav, _stgToggle, _stgSaved, _zaToggle,
+    _stgNav, _stgToggle, _stgSaved, _zaToggle, _zaSyncTimeline,
     _ctx: { state, getZones, esc, todayKey, storage, toast, timerStart }
   };
 })();
