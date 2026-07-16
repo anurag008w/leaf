@@ -1454,11 +1454,12 @@ const ZoneApp = (() => {
     body.innerHTML = `
       <div class="console-toolbar">
         <div class="ct-left">
-          <button class="ct-btn sidebar-toggle" onclick="ZoneApp.toggleSidebar()" title="Toggle sidebar">${state.sidebarOpen ? '☰' : '☰'}</button>
+          <button class="ct-btn sidebar-toggle" onclick="ZoneApp.toggleSidebar()" title="Toggle sidebar (S)">${state.sidebarOpen ? '◀' : '☰'}</button>
           <span class="ct-label">ZONE ${String(cur.id ?? state.currentZoneIdx + 1).padStart(2,'0')} · ${to12h(cur.startTime)} — ${to12h(cur.endTime)}</span>
         </div>
         <div class="ct-actions">
           <button class="ct-btn fs-toggle" onclick="ZoneApp.toggleFullscreen()" title="Fullscreen">⛶</button>
+          <button class="shortcuts-btn">?<span class="shortcuts-tip"><b>Space</b> Play/Pause<br><b>S</b> Toggle Sidebar<br><b>Esc</b> Close Modal<br><b>1-4</b> Switch Tab</span></button>
           <label class="ct-btn">⬆ Import<input type="file" accept=".json,application/json" style="display:none" onchange="ZoneApp.importConfig(this.files[0])"></label>
           <button class="ct-btn" onclick="ZoneApp.exportConfig()">⬇ Export</button>
         </div>
@@ -1489,6 +1490,11 @@ const ZoneApp = (() => {
         </div>
         <div class="dp-strip" id="dpStrip"></div>
         <div class="dp-labels" id="dpLabels"></div>
+        <div class="dp-legend">
+          <div class="dp-legend-item"><div class="dp-legend-dot done"></div> Completed</div>
+          <div class="dp-legend-item"><div class="dp-legend-dot left"></div> Remaining</div>
+          <div class="dp-legend-item"><div class="dp-legend-dot no-task"></div> No tasks</div>
+        </div>
       </div>`;
     renderSidebar();
     renderTimerArea();
@@ -1579,7 +1585,7 @@ const ZoneApp = (() => {
           <div class="zb-name">${esc(zz.title)}</div>
           <div class="zb-bottom">
             <span class="zb-time">${to12h(zz.startTime)} — ${to12h(zz.endTime)}</span>
-            <span class="zb-progress"><i style="width:${iDone ? 100 : (iSessions > 0 ? Math.min(50, iSessions * 25) : 0)}%"></i></span>
+            <span class="zb-progress" title="${iDone ? 'Completed' : iSkipped ? 'Skipped' : iSessions + ' sessions · ' + iMins + 'm'}"><i style="width:${iDone ? 100 : (iSessions > 0 ? Math.min(50, iSessions * 25) : 0)}%"></i></span>
           </div>
         </div>
       </button>`;
@@ -1680,7 +1686,7 @@ const ZoneApp = (() => {
           <div class="zb-name">${esc(z.title)}</div>
           <div class="zb-bottom">
             <span class="zb-time">${to12h(z.startTime)} — ${to12h(z.endTime)}</span>
-            <span class="zb-progress"><i style="width:${pct}%"></i></span>
+            <span class="zb-progress" title="Cycle ${zs?.cycle || 0} of ${z.totalCycles || '?'} — ${pct}%"><i style="width:${pct}%"></i></span>
           </div>
         </div>
       </button>`;
@@ -2112,6 +2118,11 @@ const ZoneApp = (() => {
             <div class="cal-nav-right">${totalEvents} event${totalEvents !== 1 ? 's' : ''}</div>
           </div>
           <div class="cal-grid">${cells}</div>
+          <div class="cal-legend">
+            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-today"></span> Today</div>
+            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-selected"></span> Selected</div>
+            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-events"></span> Has Events</div>
+          </div>
         </div>
 
         <div class="cal-events-panel">
@@ -2295,11 +2306,40 @@ const ZoneApp = (() => {
 
   function deleteEvent(id) {
     if (id && id.startsWith('default-')) { toast('Default events cannot be deleted', 'info'); return; }
-    if (!confirm('Delete this event?')) return;
+    const ev = state.events.find(e => e.id === id);
+    if (!ev) return;
+    const backup = { ...ev };
     state.events = state.events.filter(e => e.id !== id);
     saveState();
     renderCalendarTab();
-    toast('Event deleted', 'info');
+    _showEventUndoToast(backup);
+  }
+
+  function _showEventUndoToast(ev) {
+    const existing = document.getElementById('undoToast');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.id = 'undoToast';
+    el.className = 'undo-toast';
+    el.innerHTML = `<span>Event deleted</span><button onclick="ZoneApp._undoDeleteEvent()">Undo</button>`;
+    document.body.appendChild(el);
+    clearTimeout(_showEventUndoToast._timer);
+    _showEventUndoToast._timer = setTimeout(() => { if (el.parentNode) el.remove(); }, 5000);
+    _lastDeletedEvent = ev;
+  }
+
+  let _lastDeletedEvent = null;
+
+  function _undoDeleteEvent() {
+    const el = document.getElementById('undoToast');
+    if (el) el.remove();
+    clearTimeout(_showEventUndoToast._timer);
+    if (_lastDeletedEvent) {
+      state.events.push(_lastDeletedEvent);
+      _lastDeletedEvent = null;
+      saveState();
+      renderCalendarTab();
+    }
   }
 
   function exportEvents() {
@@ -2394,6 +2434,7 @@ const ZoneApp = (() => {
           </div>
         </div>
 
+        <div class="stats-section-label">${state.selectedDate ? 'SELECTED DATE' : 'TODAY'}</div>
         <div class="stats-grid-4">
           <div class="stat-card-s highlight" onclick="ZoneApp.scrollToChart('focusChart')">
             <div class="num">${sessionsToday}</div>
@@ -2413,6 +2454,7 @@ const ZoneApp = (() => {
           </div>
         </div>
 
+        <div class="stats-section-label">ALL TIME</div>
         <div class="stats-grid-4">
           <div class="stat-card-s highlight">
             <div class="num">${totalSessions + totalManual}</div>
@@ -2427,7 +2469,7 @@ const ZoneApp = (() => {
             <div class="lbl">AVG SESSION</div>
           </div>
           <div class="stat-card-s">
-            <div class="num">${completionRate}%</div>
+            <div class="num">${completionRate > 0 ? completionRate + '%' : '—'}</div>
             <div class="lbl">COMPLETION</div>
           </div>
         </div>
@@ -2914,6 +2956,7 @@ const ZoneApp = (() => {
                   ${buildCountdownHTML(i, target, expired)}
                 </div>
               </div>
+              <div class="exam-caption" style="font-size:0.68rem;color:var(--muted);margin-top:6px;text-align:center">${expired ? 'This exam date has passed' : Math.floor(diff / 86400000) + ' days until ' + esc(e.name)}</div>
               ${!expired ? `<div class="exam-total" id="ecd-${i}-total">${getRemainingText(diff, state.examCountdownMode)}</div>` : ''}
             </div>`;
           }).join('')}
@@ -4817,6 +4860,7 @@ const ZoneApp = (() => {
     takeBreak, setSetting, applyPreset,
     loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
     _stgNav, _stgToggle, _stgSaved, _zaToggle, _zaSyncTimeline,
+    _undoDeleteEvent,
     _ctx: { state, getZones, esc, todayKey, storage, toast, timerStart }
   };
 })();

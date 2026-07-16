@@ -17,6 +17,7 @@
   function todos() { return state().todos || (state().todos = []); }
 
   let filterDone = 0; // 0=all, 1=pending, 2=done
+  let _lastDeletedTodo = null;
 
   /* ── CRUD ─────────────────────────────────────────────── */
   function addTodo(text, zoneIdx, cycle) {
@@ -40,9 +41,25 @@
   }
 
   function deleteTodo(id) {
+    const removed = todos().find(x => x.id === id);
+    if (!removed) return;
+    _lastDeletedTodo = { ...removed };
     state().todos = todos().filter(x => x.id !== id);
     saveTodos();
     renderTodoTab();
+    showUndoToast(removed);
+  }
+
+  function showUndoToast(todo) {
+    const existing = document.getElementById('undoToast');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.id = 'undoToast';
+    el.className = 'undo-toast';
+    el.innerHTML = `<span>Task deleted</span><button onclick="ZoneApp._tlUndoDelete()">Undo</button>`;
+    document.body.appendChild(el);
+    clearTimeout(showUndoToast._timer);
+    showUndoToast._timer = setTimeout(() => { if (el.parentNode) el.remove(); }, 5000);
   }
 
   function saveTodos() {
@@ -227,6 +244,14 @@
           <button class="tl-filter-btn ${filterDone === 1 ? 'active' : ''}" onclick="ZoneApp._tlFilterDone(1)">PENDING</button>
           <button class="tl-filter-btn ${filterDone === 2 ? 'active' : ''}" onclick="ZoneApp._tlFilterDone(2)">DONE</button>
         </div>
+
+        <!-- Quick Add -->
+        <div class="tl-quick-add">
+          <input type="text" id="tlQuickInput" placeholder="Quick add task… (Enter)" onkeydown="if(event.key==='Enter')ZoneApp._tlQuickAdd()" />
+          <button onclick="ZoneApp._tlQuickAdd()">+ Add</button>
+        </div>
+
+        ${doneCount > 0 ? `<button class="tl-clear-done" onclick="ZoneApp._tlClearDone()">✕ Clear ${doneCount} completed</button>` : ''}
 
         <!-- Todo List -->
         <div class="tl-list">
@@ -414,6 +439,37 @@
   ZoneApp._tlCloseDelModal = function () { const m = document.getElementById('tlDelModal'); if (m) m.remove(); };
   ZoneApp._tlCloseCompleteModal = function () { const m = document.getElementById('tlCompleteModal'); if (m) m.remove(); };
   ZoneApp._tlFilterDone = function (v) { filterDone = v; renderTodoTab(); };
+
+  ZoneApp._tlQuickAdd = function () {
+    const input = document.getElementById('tlQuickInput');
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    addTodo(text, -1, -1);
+    input.value = '';
+    input.focus();
+  };
+
+  ZoneApp._tlClearDone = function () {
+    const done = todos().filter(t => t.done);
+    if (done.length === 0) return;
+    state().todos = todos().filter(t => !t.done);
+    saveTodos();
+    renderTodoTab();
+    toast(`Cleared ${done.length} completed task${done.length > 1 ? 's' : ''}`, 'success');
+  };
+
+  ZoneApp._tlUndoDelete = function () {
+    const el = document.getElementById('undoToast');
+    if (el) el.remove();
+    clearTimeout(showUndoToast._timer);
+    if (_lastDeletedTodo) {
+      todos().push(_lastDeletedTodo);
+      _lastDeletedTodo = null;
+      saveTodos();
+      renderTodoTab();
+    }
+  };
 
   ZoneApp._tlUpdateCycleOptions = function (selectId, zoneVal, preSelect) {
     const sel = document.getElementById(selectId);

@@ -281,12 +281,12 @@ def _git_init_and_push(data_path: Path, repo_url: str, username: str, force_mode
                 r = _run(fallback_cmd, cwd=str(tmp_path))
                 if r.returncode != 0:
                     raise RuntimeError(f"Force-with-lease retry also failed: {r.stderr}")
-                log.info("pushed (force-with-lease fallback) to %s", repo_url)
+                log.info("pushed (force-with-lease fallback) to %s", _safe_url(repo_url))
                 return
 
         if r.returncode != 0:
             raise RuntimeError(f"Push failed ({force_mode}): {r.stderr}")
-        log.info("pushed (%s) to %s", force_mode, repo_url)
+        log.info("pushed (%s) to %s", force_mode, _safe_url(repo_url))
 
 
 def _git_pull_to(local_path: Path, repo_url: str, force_mode: str = "normal") -> bool:
@@ -347,7 +347,7 @@ def _git_pull_to(local_path: Path, repo_url: str, force_mode: str = "normal") ->
             else:
                 shutil.copy2(item, dst)
 
-        log.info("pulled %d items from %s (mode: %s)", len(items), repo_url, force_mode)
+        log.info("pulled %d items from %s (mode: %s)", len(items), _safe_url(repo_url), force_mode)
         return True
 
 
@@ -366,6 +366,13 @@ def _auth_url(username: str) -> str:
     if GH_TOKEN:
         return f"https://{GH_TOKEN}@github.com/{username}/{REPO_NAME}.git"
     return f"https://github.com/{username}/{REPO_NAME}.git"
+
+
+def _safe_url(url: str) -> str:
+    """Strip token from URL for safe logging."""
+    if GH_TOKEN and GH_TOKEN in url:
+        return url.replace(GH_TOKEN, "***")
+    return url
 
 
 def push_data(force_mode: str = "normal") -> SyncResult:

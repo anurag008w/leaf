@@ -1393,7 +1393,7 @@ input[type=range]::-moz-range-progress {
   .exam-num { font-size: 30px; }
   .exam-card { padding: 20px 16px; }
 }
-#tabBody { animation: fadeIn 0.2s ease; }
+#tabBody { animation: fadeIn 0.2s ease; max-width: 1200px; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -1417,6 +1417,48 @@ footer {
 *::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--accent-solve) 70%, white);
 }
+
+/* Day progress legend */
+.dp-legend { display: flex; gap: 14px; margin-top: 10px; }
+.dp-legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.68rem; color: var(--muted); }
+.dp-legend-dot { width: 8px; height: 8px; border-radius: 3px; }
+.dp-legend-dot.done { background: var(--accent); }
+.dp-legend-dot.left { background: var(--bg); border: 1.5px solid var(--border); }
+.dp-legend-dot.no-task { background: var(--surface); border: 1.5px dashed var(--border); opacity: 0.5; }
+
+/* Todo quick-add input */
+.tl-quick-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.tl-quick-add input { flex: 1; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.82rem; font-family: inherit; outline: none; transition: border 0.2s; }
+.tl-quick-add input:focus { border-color: var(--accent); }
+.tl-quick-add input::placeholder { color: var(--muted); }
+.tl-quick-add button { padding: 8px 14px; background: var(--accent); color: var(--accent-text); border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+.tl-quick-add button:hover { opacity: 0.85; }
+
+/* Todo clear-done button */
+.tl-clear-done { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; margin-bottom: 10px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 0.7rem; cursor: pointer; transition: all 0.2s; }
+.tl-clear-done:hover { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+
+/* Calendar legend strip */
+.cal-legend { display: flex; gap: 14px; padding: 8px 12px; margin-bottom: 10px; border-radius: 8px; background: var(--surface); }
+.cal-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }
+.cal-dot-today { background: var(--accent); }
+.cal-dot-selected { background: var(--highlight); }
+.cal-dot-events { background: var(--success); }
+
+/* Stats section labels */
+.stats-section-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+
+/* Keyboard shortcuts tooltip */
+.shortcuts-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-left: 6px; flex-shrink: 0; }
+.shortcuts-btn:hover { background: var(--surface); color: var(--text); border-color: var(--muted); }
+.shortcuts-tip { display: none; position: absolute; bottom: calc(100% + 8px); right: 0; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 0.68rem; color: var(--text); white-space: nowrap; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.15); pointer-events: none; }
+.shortcuts-tip b { display: inline-block; min-width: 18px; padding: 1px 5px; margin-right: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-size: 0.65rem; text-align: center; }
+.shortcuts-btn:hover .shortcuts-tip { display: block; }
+
+/* Undo toast */
+.undo-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 18px; display: flex; align-items: center; gap: 12px; font-size: 0.78rem; color: var(--text); z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.15); animation: fadeInUp 0.25s ease; }
+.undo-toast button { background: var(--accent); color: var(--accent-text); border: none; border-radius: 6px; padding: 5px 12px; font-size: 0.72rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+.undo-toast button:hover { opacity: 0.85; }
 
 /* ═══════════════════════════════════════════════════
    THEME-SPECIFIC UI OVERRIDES
