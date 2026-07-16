@@ -2947,9 +2947,76 @@ const ZoneApp = (() => {
     toast('Exam dates saved', 'success');
   }
 
+  // ─── GITHUB DATA SYNC ─────────────────────────
+  let _ghSyncStatus = null;
+
+  async function loadGitHubSyncStatus() {
+    try {
+      const r = await fetch('/api/github-sync/status');
+      _ghSyncStatus = await r.json();
+    } catch { _ghSyncStatus = null; }
+    return _ghSyncStatus;
+  }
+
+  async function githubPush() {
+    if (!confirm('Push local data to GitHub?')) return;
+    toast('Pushing to GitHub...', 'info');
+    try {
+      const r = await fetch('/api/github-sync/push', { method: 'POST' });
+      const d = await r.json();
+      if (d.success) toast(d.message, 'success');
+      else toast(d.message, 'error');
+      await loadGitHubSyncStatus();
+      renderTabBody();
+    } catch (e) { toast('Push failed: ' + e.message, 'error'); }
+  }
+
+  async function githubPull() {
+    if (!confirm('Pull data from GitHub? This will overwrite local data!')) return;
+    toast('Pulling from GitHub...', 'info');
+    try {
+      const r = await fetch('/api/github-sync/pull', { method: 'POST' });
+      const d = await r.json();
+      if (d.success) { toast(d.message, 'success'); setTimeout(() => location.reload(), 1000); }
+      else toast(d.message, 'error');
+    } catch (e) { toast('Pull failed: ' + e.message, 'error'); }
+  }
+
+  function renderGitHubSyncCard() {
+    if (!_ghSyncStatus || !_ghSyncStatus.gh_authenticated) return '';
+    const s = _ghSyncStatus;
+    return `
+      <div class="settings-card">
+        <div class="field-label" style="margin-bottom:14px">🔗 GitHub Data Sync</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <div style="font-size:12px;color:var(--text-muted)">Account</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(s.gh_username)}</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+            <div style="font-size:12px;color:var(--text-muted)">Repo</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(s.repo_name)} ${s.repo_exists ? '✅' : '❌'}</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+            <div style="font-size:12px;color:var(--text-muted)">Local Data</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${s.data_dir_has_content ? '✅ Has data' : '📁 Empty'}</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+            <div style="font-size:12px;color:var(--text-muted)">Auto-sync</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${s.sync_enabled ? '✅ Every ' + Math.round(s.sync_interval / 60) + 'min' : '⏸ Disabled'}</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="ctl primary" onclick="ZoneApp.githubPush()" style="padding:8px 16px;font-size:11px">⬆ Push to GitHub</button>
+            <button class="ctl" onclick="ZoneApp.githubPull()" style="padding:8px 16px;font-size:11px">⬇ Pull from GitHub</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
   // ─── SETTINGS TAB ───────────────────────────
-  function renderSettingsTab() {
+  async function renderSettingsTab() {
     const body = document.getElementById('tabBody');
+    await loadGitHubSyncStatus();
     body.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
         <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
@@ -3093,6 +3160,7 @@ const ZoneApp = (() => {
               <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
             </div>
           </div>
+          ${renderGitHubSyncCard()}
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Session</div>
             <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:8px 16px;font-size:11px">🚪 Logout</button>
@@ -4348,6 +4416,7 @@ const ZoneApp = (() => {
     setCountdownMode,
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset,
+    loadGitHubSyncStatus, githubPush, githubPull,
     _ctx: { state, getZones, esc, todayKey, storage, toast }
   };
 })();
