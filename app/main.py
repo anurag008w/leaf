@@ -59,6 +59,9 @@ _sync_last_mm: tuple[int, int, int, str] | None = None
 if HF_TOKEN:
     from app import sync as zone_sync
 
+# GitHub sync — always importable (detects env at runtime)
+from app import github_sync
+
 _active_tokens = set()
 _token_users: dict[str, str] = {}
 _token_created: dict[str, float] = {}
@@ -349,7 +352,40 @@ async def lifespan(app: FastAPI):
         global _sync_task, _sync_last_fp, _sync_last_mm
         _sync_task = asyncio.create_task(_sync_loop())
 
+    # ── GitHub sync startup ─────────────────────────
+    gh_sync_task: asyncio.Task | None = None
+    if github_sync.GITHUB_SYNC_ENABLED != "false":
+        try:
+            gh_status = await asyncio.to_thread(github_sync.detect_environment)
+            if gh_status.gh_authenticated:
+                log.info("GitHub sync: authenticated as %s", gh_status.gh_username)
+                if gh_status.repo_exists:
+                    # Auto-pull if local data is empty
+                    if not gh_status.data_dir_exists:
+                        log.info("GitHub sync: local data empty, pulling from GitHub...")
+                        result = await asyncio.to_thread(github_sync.pull_data)
+                        if result.success:
+                            log.info("GitHub sync: %s", result.message)
+                        else:
+                            log.warning("GitHub sync pull failed: %s", result.message)
+                    # Start auto-sync background task
+                    gh_sync_task = asyncio.create_task(_gh_sync_loop())
+                else:
+                    log.info("GitHub sync: repo '%s' not found. Use /api/github-sync/push to create.", github_sync.REPO_NAME)
+            else:
+                log.info("GitHub sync: not available (gh CLI not authenticated)")
+        except Exception as exc:
+            log.warning("GitHub sync init failed: %s", exc)
+
     yield
+
+    # ── Shutdown ────────────────────────────────────
+    if gh_sync_task is not None:
+        gh_sync_task.cancel()
+        try:
+            await gh_sync_task
+        except asyncio.CancelledError:
+            pass
 
     if HF_TOKEN and _sync_task is not None:
         _sync_task.cancel()
@@ -374,6 +410,21 @@ async def _sync_loop():
             log.warning("sync failed: %s", exc)
         await asyncio.sleep(SYNC_INTERVAL)
 
+async def _gh_sync_loop():
+    """Auto-push data to GitHub periodically."""
+    await asyncio.sleep(60)  # initial delay
+    while True:
+        try:
+            if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
+                result = await asyncio.to_thread(github_sync.push_data)
+                if result.success:
+                    log.info("GitHub auto-sync: %s", result.message)
+                else:
+                    log.warning("GitHub auto-sync failed: %s", result.message)
+        except Exception as exc:
+            log.warning("GitHub auto-sync error: %s", exc)
+        await asyncio.sleep(github_sync.GITHUB_SYNC_INTERVAL)
+
 # ── App creation ──────────────────────────────────
 app = FastAPI(title="Zone Study OS", version="1.0.0", lifespan=lifespan)
 
@@ -391,7 +442,7 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status"}
+    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status"}
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
@@ -905,6 +956,30 @@ async def sync_import(body: SyncImportBody, request: Request):
             except Exception as e:
                 errors.append(f"{key}: {e}")
     return {"status": "ok", "errors": errors}
+
+# ── GitHub Data Sync ────────────────────────────────
+@app.get("/api/github-sync/status")
+async def github_sync_status():
+    """Check GitHub sync environment and repo status."""
+    return github_sync.sync_status()
+
+@app.post("/api/github-sync/push")
+async def github_sync_push(request: Request):
+    """Push local data to GitHub."""
+    check_rate_limit(rate_limit_key(request))
+    result = await asyncio.to_thread(github_sync.push_data)
+    return {"success": result.success, "message": result.message,
+            "direction": result.direction, "repo_url": result.repo_url,
+            "files_affected": result.files_affected}
+
+@app.post("/api/github-sync/pull")
+async def github_sync_pull(request: Request):
+    """Pull data from GitHub to local."""
+    check_rate_limit(rate_limit_key(request))
+    result = await asyncio.to_thread(github_sync.pull_data)
+    return {"success": result.success, "message": result.message,
+            "direction": result.direction, "repo_url": result.repo_url,
+            "files_affected": result.files_affected}
 
 # ── Hub dashboard ────────────────────────────────────
 @app.get("/api/hub")
