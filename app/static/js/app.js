@@ -4340,7 +4340,7 @@ const ZoneApp = (() => {
   async function deleteResetKey(key) {
     if (!confirm('Delete this reset key? The user won\'t be able to use it anymore.')) return;
     try {
-      await fetchJSON('/api/admin/delete-reset-key', { method: 'POST', body: { key } });
+      await fetchJSON('/api/admin/delete-reset-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
       toast('Reset key deleted', 'success');
       loadResetKeys();
     } catch { toast('Failed to delete key', 'error'); }
