@@ -42,11 +42,70 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 .guest-hint{font-size:10px;color:var(--text-muted);margin-top:8px;font-family:var(--mono);opacity:.6}
 .panel{display:block}
 .panel.hide{display:none}
+.sync-screen{display:none}
+.sync-screen.active{display:block}
+.sync-card{background:var(--bg-3);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;text-align:left}
+.sync-card .title{font-size:13px;font-weight:700;margin-bottom:6px}
+.sync-card .desc{font-size:11px;color:var(--text-muted);line-height:1.5}
+.sync-row{display:flex;gap:8px;margin-top:10px}
+.sync-btn{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;text-align:center}
+.sync-btn:hover{border-color:var(--accent-lecture);color:var(--accent-lecture)}
+.sync-btn.primary{background:var(--accent-lecture);color:#fff;border-color:var(--accent-lecture)}
+.sync-btn.primary:hover{opacity:.9}
+.sync-btn.danger{border-color:#f87171;color:#f87171}
+.sync-btn.danger:hover{background:#f87171;color:#fff}
+.sync-btn.warn{border-color:#f59e0b;color:#f59e0b}
+.sync-btn.warn:hover{background:#f59e0b;color:#fff}
+.sync-status{font-size:11px;color:var(--text-muted);margin-top:8px;min-height:16px}
+.sync-status.ok{color:var(--accent-suc)}
+.sync-status.err{color:#f87171}
+.sync-mode-select{display:none;flex-direction:column;gap:6px;margin-top:10px}
+.sync-mode-select.active{display:flex}
+.sync-input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text);font-size:12px;font-family:var(--mono);margin-top:8px;outline:none}
+.sync-input:focus{border-color:var(--accent-lecture)}
 </style>
 </head>
 <body>
 <div class="login-wrap">
+
+<!-- SYNC SCREEN (pre-login, server restart only) -->
+<div class="sync-screen" id="syncScreen">
 <div class="login-box">
+<span class="logo" aria-hidden="true">🔄</span>
+<h1>DATA SYNC</h1>
+<p class="sub">Server restarted — pull your data from GitHub before login</p>
+
+<div style="margin-top:20px">
+<div class="sync-card" id="syncCard">
+  <div class="title">⬇️ Pull from GitHub</div>
+  <div class="desc">Fetch your data from <b id="syncRepoName">zone-data-backup</b> and restore locally.</div>
+  <div class="sync-row">
+    <button class="sync-btn primary" onclick="doSyncPull('normal')">⬇ Normal Pull</button>
+    <button class="sync-btn danger" onclick="doSyncPull('force')">⚡ Force Pull</button>
+    <button class="sync-btn warn" onclick="doSyncPull('force-with-lease')">🔒 Lease Pull</button>
+  </div>
+  <div class="sync-status" id="pullStatus"></div>
+</div>
+
+<div class="sync-card">
+  <div class="title">⬆️ Push to GitHub</div>
+  <div class="desc">Push local data to GitHub for safekeeping.</div>
+  <div class="sync-row">
+    <button class="sync-btn" onclick="doSyncPush('normal')">⬆ Normal Push</button>
+    <button class="sync-btn danger" onclick="doSyncPush('force')">⚡ Force Push</button>
+    <button class="sync-btn warn" onclick="doSyncPush('force-with-lease')">🔒 Lease Push</button>
+  </div>
+  <div class="sync-status" id="pushStatus"></div>
+</div>
+</div>
+
+<button class="btn btn-ghost" onclick="dismissSync()" style="margin-top:8px">SKIP → Login</button>
+<div class="hint" style="margin-top:12px">Sync data first, then login normally</div>
+</div>
+</div>
+<!-- END SYNC SCREEN -->
+
+<div class="login-box" id="loginBox">
 <span class="logo" aria-hidden="true">🎯</span>
 <h1>ZONE OS</h1>
 <p class="sub">Study Execution System</p>
@@ -191,6 +250,42 @@ document.getElementById('signupPass').addEventListener('keydown',e=>{if(e.key===
 document.getElementById('resetUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
 document.getElementById('resetAdminPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
 document.getElementById('resetNewPass').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('resetBtn').click()});
+
+// ─── SYNC SCREEN ────────────────────────────
+(function(){
+  fetch('/api/sync-screen').then(r=>r.json()).then(s=>{
+    if(!s.show) return;
+    document.getElementById('syncScreen').classList.add('active');
+    document.getElementById('loginBox').style.display='none';
+    document.getElementById('syncRepoName').textContent=s.repo_name||'zone-data-backup';
+  }).catch(()=>{});
+})();
+
+function dismissSync(){
+  fetch('/api/sync-screen/dismiss',{method:'POST'}).catch(()=>{});
+  document.getElementById('syncScreen').classList.remove('active');
+  document.getElementById('loginBox').style.display='';
+}
+
+function doSyncPull(mode){
+  const st=document.getElementById('pullStatus');
+  st.className='sync-status';st.textContent='Pulling ('+mode+')...';
+  fetch('/api/sync-screen/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})})
+  .then(r=>r.json()).then(d=>{
+    if(d.success){st.className='sync-status ok';st.textContent='✅ '+d.message+' — Reloading...';setTimeout(()=>location.reload(),1500)}
+    else{st.className='sync-status err';st.textContent='❌ '+d.message}
+  }).catch(e=>{st.className='sync-status err';st.textContent='❌ '+e.message});
+}
+
+function doSyncPush(mode){
+  const st=document.getElementById('pushStatus');
+  st.className='sync-status';st.textContent='Pushing ('+mode+')...';
+  fetch('/api/sync-screen/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})})
+  .then(r=>r.json()).then(d=>{
+    if(d.success){st.className='sync-status ok';st.textContent='✅ '+d.message}
+    else{st.className='sync-status err';st.textContent='❌ '+d.message}
+  }).catch(e=>{st.className='sync-status err';st.textContent='❌ '+e.message});
+}
 </script>
 </body>
 </html>

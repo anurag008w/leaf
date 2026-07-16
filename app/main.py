@@ -71,6 +71,7 @@ USERS_FILE = DATA_DIR / "users.json"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 GUEST_PREFIX = "guest_"
 IS_LOCAL = SPACE_ID == ""
+_server_restarted = True  # True until first successful auth — shows sync screen
 
 # ── In-memory rate limiter ─────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
@@ -449,7 +450,7 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status"}
+    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status", "/api/sync-screen", "/api/sync-screen/push", "/api/sync-screen/pull"}
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
@@ -504,6 +505,7 @@ async def signup(body: SignupBody, request: Request):
 
 @app.post("/api/login")
 async def login(body: LoginBody, request: Request):
+    global _server_restarted
     check_rate_limit(rate_limit_key(request))
     uname = body.username.strip()
     if ZONE_PASSWORD and uname == ZONE_USERNAME and secrets.compare_digest(body.password, ZONE_PASSWORD):
@@ -511,6 +513,7 @@ async def login(body: LoginBody, request: Request):
         token = make_session(uname)
         resp = JSONResponse({"token": token, "username": uname})
         make_secure_cookie(resp, token)
+        _server_restarted = False
         log.info("admin login: %s", uname)
         return resp
     users = load_users()
@@ -521,6 +524,7 @@ async def login(body: LoginBody, request: Request):
         token = make_session(uname)
         resp = JSONResponse({"token": token, "username": uname})
         make_secure_cookie(resp, token)
+        _server_restarted = False
         log.info("user login: %s", uname)
         return resp
     raise HTTPException(401, "invalid credentials")
@@ -963,6 +967,64 @@ async def sync_import(body: SyncImportBody, request: Request):
             except Exception as e:
                 errors.append(f"{key}: {e}")
     return {"status": "ok", "errors": errors}
+
+# ── Pre-login Sync Screen ──────────────────────────
+@app.get("/api/sync-screen")
+async def sync_screen_status():
+    """Check if sync screen should show (server restarted, data may be empty)."""
+    global _server_restarted
+    gh_status = await asyncio.to_thread(github_sync.detect_environment)
+    has_users = USERS_FILE.exists() and USERS_FILE.stat().st_size > 2 if USERS_FILE.exists() else False
+    has_data = DATA_DIR.exists() and any(DATA_DIR.iterdir()) if DATA_DIR.exists() else False
+    return {
+        "show": _server_restarted and gh_status.gh_authenticated,
+        "gh_authenticated": gh_status.gh_authenticated,
+        "gh_username": gh_status.gh_username,
+        "repo_exists": gh_status.repo_exists,
+        "repo_name": github_sync.REPO_NAME,
+        "has_users": has_users,
+        "has_data": has_data,
+        "data_dir": str(github_sync.DATA_DIR),
+    }
+
+@app.post("/api/sync-screen/push")
+async def sync_screen_push(request: Request):
+    """Push from sync screen (admin only, no auth required — data is empty)."""
+    global _server_restarted
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    mode = body.get("mode", "normal")
+    if mode not in ("normal", "force", "force-with-lease"):
+        mode = "normal"
+    result = await asyncio.to_thread(github_sync.push_data, force_mode=mode)
+    if result.success:
+        _server_restarted = False
+    return {"success": result.success, "message": result.message,
+            "direction": result.direction, "repo_url": result.repo_url,
+            "files_affected": result.files_affected}
+
+@app.post("/api/sync-screen/pull")
+async def sync_screen_pull(request: Request):
+    """Pull from sync screen (admin only, no auth required — data is empty)."""
+    global _server_restarted
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    mode = body.get("mode", "normal")
+    if mode not in ("normal", "force", "force-with-lease"):
+        mode = "normal"
+    result = await asyncio.to_thread(github_sync.pull_data, force_mode=mode)
+    if result.success:
+        _server_restarted = False
+        # Reload sessions after pull
+        load_sessions()
+    return {"success": result.success, "message": result.message,
+            "direction": result.direction, "repo_url": result.repo_url,
+            "files_affected": result.files_affected}
+
+@app.post("/api/sync-screen/dismiss")
+async def sync_screen_dismiss():
+    """Dismiss sync screen — proceed to normal login."""
+    global _server_restarted
+    _server_restarted = False
+    return {"ok": True}
 
 # ── GitHub Data Sync (admin only) ───────────────────
 def _require_admin(request: Request):
