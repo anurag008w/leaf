@@ -358,11 +358,17 @@
   function _clClose() {
     const m = document.getElementById('clChecklistModal');
     if (m) m.remove();
-    // After dismissing checklist, auto-start next focus if flowMode is on
+    // After dismissing checklist, auto-start next focus ONLY if timer isn't already running
+    // (autoStartBreaks OFF: overtime timer is running → don't start again)
+    // (autoStartBreaks ON / break ended: timer stopped → start next focus)
     try {
       const s = ctx().state;
       if (s && s.settings && s.settings.flowMode) {
-        ctx().timerStart();
+        const zs = s.byZone && s.byZone[s.currentZoneIdx];
+        // Only auto-start if timer is NOT already running (overtime case)
+        if (!zs || !zs.running) {
+          ctx().timerStart();
+        }
       }
     } catch {}
   }

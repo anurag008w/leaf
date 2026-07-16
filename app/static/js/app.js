@@ -948,6 +948,10 @@ const ZoneApp = (() => {
         stopTimer();
         state.timerHandle = setInterval(timerTick, 1000);
         renderAll();
+        // Show checklist NOW — before overtime kicks in
+        if (ZoneApp.openCycleChecklist) {
+          ZoneApp.openCycleChecklist(state.currentZoneIdx, zs.cycle, z.title);
+        }
       }
     } else {
       chime('transition');
