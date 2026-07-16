@@ -957,15 +957,22 @@ async def sync_import(body: SyncImportBody, request: Request):
                 errors.append(f"{key}: {e}")
     return {"status": "ok", "errors": errors}
 
-# ── GitHub Data Sync ────────────────────────────────
+# ── GitHub Data Sync (admin only) ───────────────────
+def _require_admin(request: Request):
+    """Check that the current user is the admin."""
+    uname = getattr(request.state, "username", "")
+    if uname != ZONE_USERNAME:
+        raise HTTPException(403, "only admin can use GitHub sync")
+
 @app.get("/api/github-sync/status")
-async def github_sync_status():
-    """Check GitHub sync environment and repo status."""
+async def github_sync_status(request: Request):
+    """Check GitHub sync environment and repo status (any logged-in user can read)."""
     return github_sync.sync_status()
 
 @app.post("/api/github-sync/push")
 async def github_sync_push(request: Request):
-    """Push local data to GitHub. Query param: mode=normal|force|force-with-lease"""
+    """Push local data to GitHub. Admin only. mode=normal|force|force-with-lease"""
+    _require_admin(request)
     check_rate_limit(rate_limit_key(request))
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     mode = body.get("mode", "normal")
@@ -978,7 +985,8 @@ async def github_sync_push(request: Request):
 
 @app.post("/api/github-sync/pull")
 async def github_sync_pull(request: Request):
-    """Pull data from GitHub to local. Query param: mode=normal|force|force-with-lease"""
+    """Pull data from GitHub to local. Admin only. mode=normal|force|force-with-lease"""
+    _require_admin(request)
     check_rate_limit(rate_limit_key(request))
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     mode = body.get("mode", "normal")

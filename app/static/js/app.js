@@ -3140,6 +3140,7 @@ const ZoneApp = (() => {
 
   function renderGitHubSyncCard() {
     if (!_ghSyncStatus || !_ghSyncStatus.gh_authenticated) return '';
+    if (!state.isAdmin) return '';  // admin only
     const s = _ghSyncStatus;
     return `
       <div class="settings-card">

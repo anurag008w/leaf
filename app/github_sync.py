@@ -26,6 +26,7 @@ DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(_PROJECT_ROOT / "data")))
 
 REPO_NAME = os.environ.get("GITHUB_REPO", "").strip() or "zone-data-backup"
 GITHUB_SYNC_ENABLED = os.environ.get("GITHUB_SYNC_ENABLED", "").strip().lower()
+GH_TOKEN = os.environ.get("GH_TOKEN", "").strip()
 
 try:
     GITHUB_SYNC_INTERVAL = max(60, int(os.environ.get("GITHUB_SYNC_INTERVAL", "300") or "300"))
@@ -292,6 +293,13 @@ class SyncResult:
     files_affected: int = 0
 
 
+def _auth_url(username: str) -> str:
+    """Build git remote URL with GH_TOKEN if available."""
+    if GH_TOKEN:
+        return f"https://{GH_TOKEN}@github.com/{username}/{REPO_NAME}.git"
+    return f"https://github.com/{username}/{REPO_NAME}.git"
+
+
 def push_data(force_mode: str = "normal") -> SyncResult:
     """Push local data to GitHub.
 
@@ -302,7 +310,7 @@ def push_data(force_mode: str = "normal") -> SyncResult:
         return SyncResult(False, "gh CLI not authenticated. Run: gh auth login", direction="push")
 
     username = status.gh_username
-    repo_url = f"https://github.com/{username}/{REPO_NAME}.git"
+    repo_url = _auth_url(username)
 
     # Create repo if it doesn't exist
     if not status.repo_exists:
@@ -320,7 +328,7 @@ def push_data(force_mode: str = "normal") -> SyncResult:
         file_count = sum(1 for _ in DATA_DIR.rglob("*") if _.is_file())
         mode_label = f" ({force_mode})" if force_mode != "normal" else ""
         return SyncResult(True, f"Pushed{mode_label} {file_count} files to GitHub", direction="push",
-                          repo_url=repo_url, files_affected=file_count)
+                          repo_url=f"https://github.com/{username}/{REPO_NAME}", files_affected=file_count)
     except Exception as e:
         return SyncResult(False, f"Push failed: {e}", direction="push")
 
@@ -335,7 +343,7 @@ def pull_data(force_mode: str = "normal") -> SyncResult:
         return SyncResult(False, "gh CLI not authenticated. Run: gh auth login", direction="pull")
 
     username = status.gh_username
-    repo_url = f"https://github.com/{username}/{REPO_NAME}.git"
+    repo_url = _auth_url(username)
 
     if not status.repo_exists:
         return SyncResult(False, f"Repo {username}/{REPO_NAME} doesn't exist on GitHub", direction="pull")
@@ -346,7 +354,7 @@ def pull_data(force_mode: str = "normal") -> SyncResult:
             file_count = sum(1 for _ in DATA_DIR.rglob("*") if _.is_file())
             mode_label = f" ({force_mode})" if force_mode != "normal" else ""
             return SyncResult(True, f"Pulled{mode_label} data from GitHub ({file_count} files)", direction="pull",
-                              repo_url=repo_url, files_affected=file_count)
+                              repo_url=f"https://github.com/{username}/{REPO_NAME}", files_affected=file_count)
         else:
             return SyncResult(False, "Failed to pull from GitHub", direction="pull")
     except Exception as e:
