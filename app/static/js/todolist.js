@@ -370,7 +370,7 @@
           ctx().timerStart();
         }
       }
-    } catch {}
+    } catch (e) { /* flowMode auto-start guard */ }
   }
 
   /* ── Public API ───────────────────────────────────────── */

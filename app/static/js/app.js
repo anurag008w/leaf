@@ -1014,8 +1014,6 @@ const ZoneApp = (() => {
         state.timerHandle = setInterval(timerTick, 1000);
         renderAll();
       }
-        renderAll();
-      }
     } else {
       chime('transition');
       notifSend('Break Over!', 'Time to focus again.');

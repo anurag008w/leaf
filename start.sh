@@ -1,12 +1,21 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-export ZONE_USERNAME="${ZONE_USERNAME:-admin}"
-if [ -z "$ZONE_PASSWORD" ]; then
-  ZONE_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))") || { echo "failed to generate ZONE_PASSWORD"; exit 1; }
-  export ZONE_PASSWORD
-  echo "⚠️  ZONE_PASSWORD not set — generated random password: $ZONE_PASSWORD"
-  echo "   Save this if you need to log in later."
+
+# Load .env file
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
 fi
+
+# Ensure defaults (actual values come from .env)
+export ZONE_USERNAME="${ZONE_USERNAME:-anurag}"
+if [ -z "$ZONE_PASSWORD" ]; then
+  ZONE_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+  export ZONE_PASSWORD
+  echo "⚠️  ZONE_PASSWORD not in .env — generated: $ZONE_PASSWORD"
+fi
+export ZONE_DATA_DIR="${ZONE_DATA_DIR:-$(pwd)/data}"
 PORT=7860
 
 # Check if port is in use using /dev/tcp (bash built-in)
