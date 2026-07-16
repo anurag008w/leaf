@@ -3248,7 +3248,7 @@ const ZoneApp = (() => {
   // ─── SETTINGS TAB ───────────────────────────
   async function renderSettingsTab() {
     const body = document.getElementById('tabBody');
-    await loadGitHubSyncStatus();
+    // Render settings immediately, don't wait for network
     body.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:20px;padding:8px 0">
         <h2 style="font-size:20px;font-weight:700">⚙️ Settings</h2>
@@ -3392,12 +3392,17 @@ const ZoneApp = (() => {
               <button class="ctl danger" onclick="ZoneApp.resetAll()" style="padding:8px 16px;font-size:11px">⚠ Reset All</button>
             </div>
           </div>
-          ${renderGitHubSyncCard()}
+          <div id="ghSyncCardSlot"></div>
           <div class="settings-card">
             <div class="field-label" style="margin-bottom:14px">Session</div>
             <button class="ctl danger" onclick="ZoneApp.logout()" style="padding:8px 16px;font-size:11px">🚪 Logout</button>
           </div>
         </div>`;
+    // Load GitHub sync status async (non-blocking)
+    loadGitHubSyncStatus().then(() => {
+      const slot = document.getElementById('ghSyncCardSlot');
+      if (slot) slot.innerHTML = renderGitHubSyncCard();
+    });
   }
 
   function editTitleInline() {
