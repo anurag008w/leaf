@@ -965,18 +965,26 @@ async def github_sync_status():
 
 @app.post("/api/github-sync/push")
 async def github_sync_push(request: Request):
-    """Push local data to GitHub."""
+    """Push local data to GitHub. Query param: mode=normal|force|force-with-lease"""
     check_rate_limit(rate_limit_key(request))
-    result = await asyncio.to_thread(github_sync.push_data)
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    mode = body.get("mode", "normal")
+    if mode not in ("normal", "force", "force-with-lease"):
+        mode = "normal"
+    result = await asyncio.to_thread(github_sync.push_data, force_mode=mode)
     return {"success": result.success, "message": result.message,
             "direction": result.direction, "repo_url": result.repo_url,
             "files_affected": result.files_affected}
 
 @app.post("/api/github-sync/pull")
 async def github_sync_pull(request: Request):
-    """Pull data from GitHub to local."""
+    """Pull data from GitHub to local. Query param: mode=normal|force|force-with-lease"""
     check_rate_limit(rate_limit_key(request))
-    result = await asyncio.to_thread(github_sync.pull_data)
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    mode = body.get("mode", "normal")
+    if mode not in ("normal", "force", "force-with-lease"):
+        mode = "normal"
+    result = await asyncio.to_thread(github_sync.pull_data, force_mode=mode)
     return {"success": result.success, "message": result.message,
             "direction": result.direction, "repo_url": result.repo_url,
             "files_affected": result.files_affected}

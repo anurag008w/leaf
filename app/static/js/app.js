@@ -2958,28 +2958,184 @@ const ZoneApp = (() => {
     return _ghSyncStatus;
   }
 
-  async function githubPush() {
-    if (!confirm('Push local data to GitHub?')) return;
-    toast('Pushing to GitHub...', 'info');
-    try {
-      const r = await fetch('/api/github-sync/push', { method: 'POST' });
-      const d = await r.json();
-      if (d.success) toast(d.message, 'success');
-      else toast(d.message, 'error');
-      await loadGitHubSyncStatus();
-      renderTabBody();
-    } catch (e) { toast('Push failed: ' + e.message, 'error'); }
+  function _githubPushModal() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    ov.innerHTML = `
+      <div class="modal-box" style="max-width:420px">
+        <div style="font-size:16px;font-weight:700;margin-bottom:12px">⬆️ Push Data to GitHub</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+          Choose how to push your local data to GitHub repo <b>${esc(_ghSyncStatus?.repo_name || 'zone-data-backup')}</b>:
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="ctl primary" id="ghPushNormal" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid var(--accent-solve)">
+            <div style="font-weight:700;margin-bottom:2px">⬆ Normal Push</div>
+            <div style="font-size:11px;opacity:0.8">Merges with remote. Safe if remote has different data.</div>
+          </button>
+          <button class="ctl" id="ghPushForce" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid var(--accent-exam);color:var(--accent-exam)">
+            <div style="font-weight:700;margin-bottom:2px">⚡ Force Push</div>
+            <div style="font-size:11px;opacity:0.8">Overwrites everything on remote with your local data. USE WHEN: Remote has someone else's data.</div>
+          </button>
+          <button class="ctl" id="ghPushLease" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid #f59e0b;color:#f59e0b">
+            <div style="font-weight:700;margin-bottom:2px">🔒 Force Push with Lease</div>
+            <div style="font-size:11px;opacity:0.8">Safer force — fails if remote has unseen changes. Prevents accidental overwrite.</div>
+          </button>
+        </div>
+        <div style="text-align:right;margin-top:16px">
+          <button class="ctl" onclick="this.closest('.modal-overlay').remove()" style="padding:8px 16px;font-size:12px">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    const doPush = async (mode, label) => {
+      ov.remove();
+      toast(`Pushing (${label}) to GitHub...`, 'info');
+      try {
+        const r = await fetch('/api/github-sync/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode })
+        });
+        const d = await r.json();
+        if (d.success) toast(d.message, 'success');
+        else toast(d.message, 'error');
+        await loadGitHubSyncStatus();
+        renderTabBody();
+      } catch (e) { toast('Push failed: ' + e.message, 'error'); }
+    };
+
+    document.getElementById('ghPushNormal').onclick = () => _ghPushConfirm('normal', 'Normal Push', doPush);
+    document.getElementById('ghPushForce').onclick = () => _ghPushConfirm('force', 'Force Push', doPush);
+    document.getElementById('ghPushLease').onclick = () => _ghPushConfirm('force-with-lease', 'Force with Lease', doPush);
   }
 
-  async function githubPull() {
-    if (!confirm('Pull data from GitHub? This will overwrite local data!')) return;
-    toast('Pulling from GitHub...', 'info');
-    try {
-      const r = await fetch('/api/github-sync/pull', { method: 'POST' });
-      const d = await r.json();
-      if (d.success) { toast(d.message, 'success'); setTimeout(() => location.reload(), 1000); }
-      else toast(d.message, 'error');
-    } catch (e) { toast('Pull failed: ' + e.message, 'error'); }
+  function _ghPushConfirm(mode, label, doPush) {
+    const dangerColor = mode === 'normal' ? 'var(--accent-solve)' : 'var(--accent-exam)';
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    ov.innerHTML = `
+      <div class="modal-box" style="max-width:380px">
+        <div style="font-size:16px;font-weight:700;margin-bottom:8px">⚠️ Confirm ${esc(label)}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+          ${mode === 'normal'
+            ? 'Your local data will be merged with the remote repo.'
+            : `<span style="color:${dangerColor};font-weight:600">This will OVERWRITE all data on GitHub!</span><br>Remote repo data will be replaced with your local data.`
+          }
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);background:var(--bg-3);padding:10px;border-radius:8px;margin-bottom:16px">
+          📂 Local: <b>${_ghSyncStatus?.data_dir_path || 'N/A'}</b><br>
+          📁 Remote: <b>${_ghSyncStatus?.repo_name || 'N/A'}</b>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="ctl" onclick="this.closest('.modal-overlay').remove()" style="padding:8px 16px;font-size:12px">Cancel</button>
+          <button class="ctl primary" id="ghPushConfirmBtn" style="padding:8px 16px;font-size:12px;${mode !== 'normal' ? `background:var(--accent-exam);border-color:var(--accent-exam);` : ''}">${label}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    document.getElementById('ghPushConfirmBtn').onclick = () => {
+      ov.remove();
+      doPush(mode, label);
+    };
+  }
+
+  function _githubPullModal() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    ov.innerHTML = `
+      <div class="modal-box" style="max-width:420px">
+        <div style="font-size:16px;font-weight:700;margin-bottom:12px">⬇️ Pull Data from GitHub</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+          Choose how to pull from GitHub repo <b>${esc(_ghSyncStatus?.repo_name || 'zone-data-backup')}</b>:
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="ctl primary" id="ghPullNormal" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid var(--accent-solve)">
+            <div style="font-weight:700;margin-bottom:2px">⬇ Normal Pull</div>
+            <div style="font-size:11px;opacity:0.8">Replaces local files with remote data. Keeps hidden files safe.</div>
+          </button>
+          <button class="ctl" id="ghPullForce" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid var(--accent-exam);color:var(--accent-exam)">
+            <div style="font-weight:700;margin-bottom:2px">⚡ Force Pull</div>
+            <div style="font-size:11px;opacity:0.8">NUKES everything in local data folder first, then pulls fresh from remote. USE WHEN: Local has corrupted/wrong data.</div>
+          </button>
+          <button class="ctl" id="ghPullLease" style="width:100%;text-align:left;padding:12px 14px;font-size:12px;border:1px solid #f59e0b;color:#f59e0b">
+            <div style="font-weight:700;margin-bottom:2px">🔒 Force Pull with Lease</div>
+            <div style="font-size:11px;opacity:0.8">Pulls from remote and replaces local. Verifies remote has actual content before overwriting.</div>
+          </button>
+        </div>
+        <div style="text-align:right;margin-top:16px">
+          <button class="ctl" onclick="this.closest('.modal-overlay').remove()" style="padding:8px 16px;font-size:12px">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    const doPull = async (mode, label) => {
+      ov.remove();
+      toast(`Pulling (${label}) from GitHub...`, 'info');
+      try {
+        const r = await fetch('/api/github-sync/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode })
+        });
+        const d = await r.json();
+        if (d.success) { toast(d.message, 'success'); setTimeout(() => location.reload(), 1000); }
+        else toast(d.message, 'error');
+      } catch (e) { toast('Pull failed: ' + e.message, 'error'); }
+    };
+
+    document.getElementById('ghPullNormal').onclick = () => _ghPullConfirm('normal', 'Normal Pull', doPull);
+    document.getElementById('ghPullForce').onclick = () => _ghPullConfirm('force', 'Force Pull', doPull);
+    document.getElementById('ghPullLease').onclick = () => _ghPullConfirm('force-with-lease', 'Force with Lease', doPull);
+  }
+
+  function _ghPullConfirm(mode, label, doPull) {
+    const dangerColor = mode === 'normal' ? 'var(--accent-solve)' : 'var(--accent-exam)';
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    ov.innerHTML = `
+      <div class="modal-box" style="max-width:380px">
+        <div style="font-size:16px;font-weight:700;margin-bottom:8px">⚠️ Confirm ${esc(label)}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">
+          ${mode === 'normal'
+            ? 'Local files will be replaced with remote data. Hidden files are kept safe.'
+            : mode === 'force'
+              ? `<span style="color:${dangerColor};font-weight:600">This will DELETE ALL local data first!</span><br>Then pull fresh from remote. Nothing will be recoverable.`
+              : `<span style="color:#f59e0b;font-weight:600">Pulls from remote and replaces local data.</span><br>Verifies remote content before overwriting.`
+          }
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);background:var(--bg-3);padding:10px;border-radius:8px;margin-bottom:16px">
+          📁 Remote: <b>${_ghSyncStatus?.repo_name || 'N/A'}</b><br>
+          📂 Local: <b>${_ghSyncStatus?.data_dir_path || 'N/A'}</b>
+          ${mode === 'force' ? '<br><span style="color:var(--accent-exam)">⚠️ Local data will be destroyed first</span>' : ''}
+        </div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:14px">Type <span style="color:var(--accent-exam)">PULL</span> to confirm:</div>
+        <input type="text" id="ghPullConfirmInput" placeholder="Type PULL"
+          style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text-primary);font-size:13px;margin-bottom:14px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="ctl" onclick="this.closest('.modal-overlay').remove()" style="padding:8px 16px;font-size:12px">Cancel</button>
+          <button class="ctl primary" id="ghPullConfirmBtn" disabled style="padding:8px 16px;font-size:12px;opacity:0.5;${mode !== 'normal' ? `background:var(--accent-exam);border-color:var(--accent-exam);` : ''}">${label}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    const input = document.getElementById('ghPullConfirmInput');
+    const btn = document.getElementById('ghPullConfirmBtn');
+    input.focus();
+    input.oninput = () => {
+      const ok = input.value.trim().toUpperCase() === 'PULL';
+      btn.disabled = !ok;
+      btn.style.opacity = ok ? '1' : '0.5';
+    };
+    input.onkeydown = e => {
+      if (e.key === 'Enter' && !btn.disabled) btn.click();
+    };
+    btn.onclick = () => {
+      ov.remove();
+      doPull(mode, label);
+    };
   }
 
   function renderGitHubSyncCard() {
@@ -2995,19 +3151,19 @@ const ZoneApp = (() => {
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
             <div style="font-size:12px;color:var(--text-muted)">Repo</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(s.repo_name)} ${s.repo_exists ? '✅' : '❌'}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(s.repo_name)} ${s.repo_exists ? '✅' : '❌ (will create on first push)'}</div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
             <div style="font-size:12px;color:var(--text-muted)">Local Data</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${s.data_dir_has_content ? '✅ Has data' : '📁 Empty'}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${s.data_dir_has_content ? '✅ Has data (' + s.data_dir.split('/').pop() + ')' : '📁 Empty'}</div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
             <div style="font-size:12px;color:var(--text-muted)">Auto-sync</div>
             <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${s.sync_enabled ? '✅ Every ' + Math.round(s.sync_interval / 60) + 'min' : '⏸ Disabled'}</div>
           </div>
           <div style="display:flex;gap:8px;margin-top:6px">
-            <button class="ctl primary" onclick="ZoneApp.githubPush()" style="padding:8px 16px;font-size:11px">⬆ Push to GitHub</button>
-            <button class="ctl" onclick="ZoneApp.githubPull()" style="padding:8px 16px;font-size:11px">⬇ Pull from GitHub</button>
+            <button class="ctl primary" onclick="ZoneApp._githubPushModal()" style="padding:8px 16px;font-size:11px">⬆ Push to GitHub</button>
+            <button class="ctl" onclick="ZoneApp._githubPullModal()" style="padding:8px 16px;font-size:11px">⬇ Pull from GitHub</button>
           </div>
         </div>
       </div>`;
@@ -4416,7 +4572,7 @@ const ZoneApp = (() => {
     setCountdownMode,
     applyTheme, setTheme,
     takeBreak, setSetting, applyPreset,
-    loadGitHubSyncStatus, githubPush, githubPull,
+    loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
     _ctx: { state, getZones, esc, todayKey, storage, toast }
   };
 })();

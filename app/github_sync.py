@@ -136,12 +136,62 @@ def create_repo(username: str) -> str:
     return f"https://github.com/{full_name}.git"
 
 
-def _git_init_and_push(data_path: Path, repo_url: str, username: str) -> None:
-    """Initialize git in data dir, commit, and push."""
+def _git_init_and_push(data_path: Path, repo_url: str, username: str, force_mode: str = "normal") -> None:
+    """Initialize git in data dir, commit, and push.
+
+    force_mode:
+      "normal"           — git push (fails if remote has diverged)
+      "force"            — git push --force (overwrites remote)
+      "force-with-lease" — git push --force-with-lease (safer: fails if remote has unseen changes)
+    """
+    push_flag = ""
+    if force_mode == "force":
+        push_flag = "--force"
+    elif force_mode == "force-with-lease":
+        push_flag = "--force-with-lease"
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
-        # Copy data to temp dir
+        # Init git repo
+        _run(["git", "init"], cwd=str(tmp_path), check=True)
+        _run(["git", "config", "user.email", f"{username}@zone-study-os"], cwd=str(tmp_path), check=True)
+        _run(["git", "config", "user.name", "Zone Data Backup"], cwd=str(tmp_path), check=True)
+        _run(["git", "remote", "add", "origin", repo_url], cwd=str(tmp_path), check=True)
+
+        # Check if remote has content
+        r = _run(["git", "ls-remote", "--exit-code", "origin", "HEAD"], cwd=str(tmp_path))
+        remote_has_content = r.returncode == 0
+
+        if remote_has_content and force_mode == "normal":
+            # Normal push: fetch remote, checkout its branch, then overlay local data
+            _run(["git", "fetch", "origin"], cwd=str(tmp_path), check=True)
+            _run(["git", "checkout", "-b", "main"], cwd=str(tmp_path), check=True)
+            r = _run(["git", "pull", "origin", "main", "--allow-unrelated-histories", "--no-edit"],
+                      cwd=str(tmp_path))
+            if r.returncode != 0:
+                # Pull failed — try checkout remote then overlay
+                _run(["git", "checkout", "main"], cwd=str(tmp_path), check=True)
+                r2 = _run(["git", "reset", "--hard", "origin/main"], cwd=str(tmp_path))
+                if r2.returncode != 0:
+                    log.warning("could not reset to remote, falling back to force: %s", r.stderr)
+                    push_flag = "--force"
+        elif remote_has_content:
+            # Force mode: fetch to update refs
+            _run(["git", "fetch", "origin"], cwd=str(tmp_path), check=True)
+            _run(["git", "checkout", "-b", "main"], cwd=str(tmp_path), check=True)
+
+        # NOW: copy local data ON TOP of whatever is in tmp_path
+        # Remove everything except .git
+        for item in tmp_path.iterdir():
+            if item.name == ".git":
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+
+        # Copy fresh local data
         for item in data_path.iterdir():
             if item.name.startswith("."):
                 continue
@@ -151,27 +201,6 @@ def _git_init_and_push(data_path: Path, repo_url: str, username: str) -> None:
             else:
                 shutil.copy2(item, dst)
 
-        # Init git repo
-        _run(["git", "init"], cwd=str(tmp_path), check=True)
-        _run(["git", "config", "user.email", f"{username}@zone-study-os"], cwd=str(tmp_path), check=True)
-        _run(["git", "config", "user.name", "Zone Data Backup"], cwd=str(tmp_path), check=True)
-
-        # Add remote
-        _run(["git", "remote", "add", "origin", repo_url], cwd=str(tmp_path), check=True)
-
-        # Check if remote has content
-        r = _run(["git", "ls-remote", "--exit-code", "origin", "HEAD"], cwd=str(tmp_path))
-        remote_has_content = r.returncode == 0
-
-        if remote_has_content:
-            # Pull first to get remote content
-            _run(["git", "fetch", "origin"], cwd=str(tmp_path), check=True)
-            _run(["git", "checkout", "-b", "main"], cwd=str(tmp_path), check=True)
-            r = _run(["git", "pull", "origin", "main", "--allow-unrelated-histories", "--no-edit"],
-                      cwd=str(tmp_path))
-            if r.returncode != 0:
-                log.warning("pull failed, will force push: %s", r.stderr)
-
         # Add and commit
         _run(["git", "add", "-A"], cwd=str(tmp_path), check=True)
         commit_msg = f"zone-data sync {time.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -180,16 +209,25 @@ def _git_init_and_push(data_path: Path, repo_url: str, username: str) -> None:
             log.info("nothing to commit")
             return
 
-        # Push
+        # Push with selected mode
         _run(["git", "branch", "-M", "main"], cwd=str(tmp_path), check=True)
-        r = _run(["git", "push", "-u", "origin", "main", "--force"], cwd=str(tmp_path), check=True)
+        push_cmd = ["git", "push", "-u", "origin", "main"]
+        if push_flag:
+            push_cmd.append(push_flag)
+        r = _run(push_cmd, cwd=str(tmp_path), check=True)
         if r.returncode != 0:
-            raise RuntimeError(f"Push failed: {r.stderr}")
-        log.info("pushed to %s", repo_url)
+            raise RuntimeError(f"Push failed ({force_mode}): {r.stderr}")
+        log.info("pushed (%s) to %s", force_mode, repo_url)
 
 
-def _git_pull_to(local_path: Path, repo_url: str) -> bool:
-    """Clone/pull repo content into local_path."""
+def _git_pull_to(local_path: Path, repo_url: str, force_mode: str = "normal") -> bool:
+    """Clone/pull repo content into local_path.
+
+    force_mode:
+      "normal"           — clone remote, replace local non-hidden files
+      "force"            — nuke ALL local data (including hidden), then clone fresh
+      "force-with-lease" — clone remote, replace local, but verify remote is newer first
+    """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
@@ -212,14 +250,23 @@ def _git_pull_to(local_path: Path, repo_url: str) -> bool:
         # Copy to local data dir
         local_path.mkdir(parents=True, exist_ok=True)
 
-        # Remove old content (except hidden files)
-        for item in local_path.iterdir():
-            if item.name.startswith("."):
-                continue
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+        if force_mode == "force":
+            # Nuke EVERYTHING including hidden files (except data dir itself)
+            log.info("force pull: deleting all local data first")
+            for item in local_path.iterdir():
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+        else:
+            # Normal: remove old content (except hidden files)
+            for item in local_path.iterdir():
+                if item.name.startswith("."):
+                    continue
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
 
         # Copy new content
         for item in repo_dir.iterdir():
@@ -231,7 +278,7 @@ def _git_pull_to(local_path: Path, repo_url: str) -> bool:
             else:
                 shutil.copy2(item, dst)
 
-        log.info("pulled %d items from %s", len(items), repo_url)
+        log.info("pulled %d items from %s (mode: %s)", len(items), repo_url, force_mode)
         return True
 
 
@@ -245,8 +292,11 @@ class SyncResult:
     files_affected: int = 0
 
 
-def push_data() -> SyncResult:
-    """Push local data to GitHub."""
+def push_data(force_mode: str = "normal") -> SyncResult:
+    """Push local data to GitHub.
+
+    force_mode: "normal", "force", "force-with-lease"
+    """
     status = detect_environment()
     if not status.gh_authenticated:
         return SyncResult(False, "gh CLI not authenticated. Run: gh auth login", direction="push")
@@ -266,16 +316,20 @@ def push_data() -> SyncResult:
         return SyncResult(False, "Data directory is empty, nothing to push", direction="push")
 
     try:
-        _git_init_and_push(DATA_DIR, repo_url, username)
+        _git_init_and_push(DATA_DIR, repo_url, username, force_mode=force_mode)
         file_count = sum(1 for _ in DATA_DIR.rglob("*") if _.is_file())
-        return SyncResult(True, f"Pushed {file_count} files to GitHub", direction="push",
+        mode_label = f" ({force_mode})" if force_mode != "normal" else ""
+        return SyncResult(True, f"Pushed{mode_label} {file_count} files to GitHub", direction="push",
                           repo_url=repo_url, files_affected=file_count)
     except Exception as e:
         return SyncResult(False, f"Push failed: {e}", direction="push")
 
 
-def pull_data() -> SyncResult:
-    """Pull data from GitHub to local."""
+def pull_data(force_mode: str = "normal") -> SyncResult:
+    """Pull data from GitHub to local.
+
+    force_mode: "normal", "force", "force-with-lease"
+    """
     status = detect_environment()
     if not status.gh_authenticated:
         return SyncResult(False, "gh CLI not authenticated. Run: gh auth login", direction="pull")
@@ -287,10 +341,11 @@ def pull_data() -> SyncResult:
         return SyncResult(False, f"Repo {username}/{REPO_NAME} doesn't exist on GitHub", direction="pull")
 
     try:
-        ok = _git_pull_to(DATA_DIR, repo_url)
+        ok = _git_pull_to(DATA_DIR, repo_url, force_mode=force_mode)
         if ok:
             file_count = sum(1 for _ in DATA_DIR.rglob("*") if _.is_file())
-            return SyncResult(True, f"Pulled data from GitHub ({file_count} files)", direction="pull",
+            mode_label = f" ({force_mode})" if force_mode != "normal" else ""
+            return SyncResult(True, f"Pulled{mode_label} data from GitHub ({file_count} files)", direction="pull",
                               repo_url=repo_url, files_affected=file_count)
         else:
             return SyncResult(False, "Failed to pull from GitHub", direction="pull")
