@@ -245,12 +245,6 @@
           <button class="tl-filter-btn ${filterDone === 2 ? 'active' : ''}" onclick="ZoneApp._tlFilterDone(2)">DONE</button>
         </div>
 
-        <!-- Quick Add -->
-        <div class="tl-quick-add">
-          <input type="text" id="tlQuickInput" placeholder="Quick add task… (Enter)" onkeydown="if(event.key==='Enter')ZoneApp._tlQuickAdd()" />
-          <button onclick="ZoneApp._tlQuickAdd()">+ Add</button>
-        </div>
-
         ${doneCount > 0 ? `<button class="tl-clear-done" onclick="ZoneApp._tlClearDone()">✕ Clear ${doneCount} completed</button>` : ''}
 
         <!-- Todo List -->

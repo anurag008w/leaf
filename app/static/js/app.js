@@ -1459,7 +1459,6 @@ const ZoneApp = (() => {
         </div>
         <div class="ct-actions">
           <button class="ct-btn fs-toggle" onclick="ZoneApp.toggleFullscreen()" title="Fullscreen">⛶</button>
-          <button class="shortcuts-btn">?<span class="shortcuts-tip"><b>Space</b> Play/Pause<br><b>S</b> Toggle Sidebar<br><b>Esc</b> Close Modal<br><b>1-4</b> Switch Tab</span></button>
           <label class="ct-btn">⬆ Import<input type="file" accept=".json,application/json" style="display:none" onchange="ZoneApp.importConfig(this.files[0])"></label>
           <button class="ct-btn" onclick="ZoneApp.exportConfig()">⬇ Export</button>
         </div>
@@ -1490,11 +1489,6 @@ const ZoneApp = (() => {
         </div>
         <div class="dp-strip" id="dpStrip"></div>
         <div class="dp-labels" id="dpLabels"></div>
-        <div class="dp-legend">
-          <div class="dp-legend-item"><div class="dp-legend-dot done"></div> Completed</div>
-          <div class="dp-legend-item"><div class="dp-legend-dot left"></div> Remaining</div>
-          <div class="dp-legend-item"><div class="dp-legend-dot no-task"></div> No tasks</div>
-        </div>
       </div>`;
     renderSidebar();
     renderTimerArea();
@@ -2118,11 +2112,6 @@ const ZoneApp = (() => {
             <div class="cal-nav-right">${totalEvents} event${totalEvents !== 1 ? 's' : ''}</div>
           </div>
           <div class="cal-grid">${cells}</div>
-          <div class="cal-legend">
-            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-today"></span> Today</div>
-            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-selected"></span> Selected</div>
-            <div class="cal-legend-item"><span class="cal-legend-dot cal-dot-events"></span> Has Events</div>
-          </div>
         </div>
 
         <div class="cal-events-panel">
