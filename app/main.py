@@ -233,13 +233,14 @@ def resolve_username(token: str) -> str | None:
         return None
     return _token_users.get(token)
 
-USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "onboarded"})
+USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "onboarded", "todos"})
 
 # Default values per key — prevents _read_json returning {} for list-valued keys
 # when the file is missing/empty/corrupt (which crashes the JS spread operator).
 USER_DATA_DEFAULTS: dict[str, Any] = {
     "events": [],
     "examDates": [],
+    "todos": [],
 }
 
 def read_user_data(uname: str) -> dict:
@@ -307,12 +308,20 @@ def make_secure_cookie(resp, token: str) -> None:
     )
 
 def make_session(username: str) -> str:
-    # Evict ALL old sessions for this user before creating a new one
-    old_tokens = [t for t, u in _token_users.items() if u == username]
-    for old_token in old_tokens:
-        _active_tokens.discard(old_token)
-        _token_users.pop(old_token, None)
-        _token_created.pop(old_token, None)
+    MAX_SESSIONS_PER_USER = 4
+
+    # Get existing sessions for this user, sorted oldest first
+    user_sessions = sorted(
+        [(t, _token_created.get(t, 0)) for t, u in _token_users.items() if u == username],
+        key=lambda x: x[1]
+    )
+
+    # If already at max (or over), evict oldest to make room
+    while len(user_sessions) >= MAX_SESSIONS_PER_USER:
+        oldest_token, _ = user_sessions.pop(0)
+        _active_tokens.discard(oldest_token)
+        _token_users.pop(oldest_token, None)
+        _token_created.pop(oldest_token, None)
 
     token = secrets.token_hex(32)
     _active_tokens.add(token)
