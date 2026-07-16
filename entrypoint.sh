@@ -3,7 +3,16 @@ set -e
 
 # Resolve data directory (default: ./data relative to project root)
 DATA_DIR="${ZONE_DATA_DIR:-data}"
-mkdir -p "$DATA_DIR"
+
+# Try to create/use DATA_DIR; if it fails (e.g., no disk mount on free tier), fallback
+if ! mkdir -p "$DATA_DIR" 2>/dev/null; then
+  echo "WARNING: Cannot create $DATA_DIR, falling back to ./data"
+  DATA_DIR="./data"
+  mkdir -p "$DATA_DIR"
+fi
+
+# Export so python process sees the resolved path
+export ZONE_DATA_DIR="$DATA_DIR"
 
 # Pre-flight checks
 if [ -z "$ZONE_PASSWORD" ] && [ "$(ls -A "$DATA_DIR/users" 2>/dev/null | wc -l)" -eq 0 ]; then

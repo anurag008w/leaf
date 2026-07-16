@@ -2,13 +2,14 @@
 # Deploy: render.com → New → Blueprint → connect repo
 #
 # Free tier: spins down after 15min idle. Use cron-job.org keepalive to stay alive.
-# Paid tier (Starter $7/mo): never spins down, persistent disk available.
+# NOTE: Free tier does NOT support persistent disk. Data will reset on restart.
+#       Use GitHub data sync (GH_TOKEN) to persist data across restarts.
 
 services:
   - type: web
     name: zone-study-os
     runtime: docker
-    plan: starter           # change to "free" for testing (15min spin-down)
+    plan: free               # free tier: spins down after 15min idle
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
@@ -22,9 +23,9 @@ services:
         value: "true"
       - key: GITHUB_SYNC_INTERVAL
         value: "300"
-      # Optional: set these for GitHub sync
-      # - key: GITHUB_REPO
-      #   value: zone-data-backup
+      # Optional: set these for GitHub sync (recommended for free tier)
+      # - key: GH_TOKEN
+      #   sync: false
       # Optional: set these for HF backup sync
       # - key: HF_TOKEN
       #   sync: false

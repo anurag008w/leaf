@@ -24,6 +24,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY --chown=user:user . .
 
 RUN mkdir -p /home/user/app/data && chmod 755 /home/user/app/data
+# Create /data mount point owned by user (for Render persistent disk)
+RUN mkdir -p /data && chown user:user /data && chmod 755 /data
 RUN chmod +x entrypoint.sh
 
 EXPOSE 7860
