@@ -1,15 +1,16 @@
 #!/bin/sh
 set -e
 
+# Resolve data directory (default: ./data relative to project root)
+DATA_DIR="${ZONE_DATA_DIR:-data}"
+mkdir -p "$DATA_DIR"
+
 # Pre-flight checks
-if [ -z "$ZONE_PASSWORD" ] && [ "$(ls -A data/users 2>/dev/null | wc -l)" -eq 0 ]; then
+if [ -z "$ZONE_PASSWORD" ] && [ "$(ls -A "$DATA_DIR/users" 2>/dev/null | wc -l)" -eq 0 ]; then
   echo "WARNING: ZONE_PASSWORD is not set and no users exist. Signup will be the only way to log in."
 fi
 
-if [ -n "$ZONE_DATA_DIR" ]; then
-  mkdir -p "$ZONE_DATA_DIR"
-  echo "ZONE_DATA_DIR=$ZONE_DATA_DIR"
-fi
+echo "DATA_DIR=$DATA_DIR"
 
 python cronjob-keepalive-setup.py || echo "keepalive setup failed, continuing startup anyway"
 

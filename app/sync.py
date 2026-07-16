@@ -33,7 +33,9 @@ try:
 except (ValueError, TypeError):
     SYNC_MAX_FILE_BYTES = 50 * 1024 * 1024
 
-DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
+_APP_DIR = Path(__file__).resolve().parent          # app/
+_PROJECT_ROOT = _APP_DIR.parent                     # project root
+DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(_PROJECT_ROOT / "data")))
 PRUNE_BATCH_SIZE = 50
 
 FileMarker: TypeAlias = tuple[int, int, int, int, str]

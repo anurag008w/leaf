@@ -24,10 +24,13 @@ logging.basicConfig(
 )
 log = logging.getLogger("zone")
 
-CONFIG_PATH = Path(__file__).parent / "config" / "zone-config.json"
+_APP_DIR = Path(__file__).resolve().parent          # app/
+_PROJECT_ROOT = _APP_DIR.parent                     # project root
+
+CONFIG_PATH = _APP_DIR / "config" / "zone-config.json"
 
 # Load .env file if present
-_env = Path(__file__).parent.parent / ".env"
+_env = _PROJECT_ROOT / ".env"
 if _env.exists():
     try:
         from dotenv import load_dotenv
@@ -35,8 +38,8 @@ if _env.exists():
         log.info("loaded .env from %s", _env)
     except ImportError:
         pass
-STATIC_DIR = Path(__file__).parent / "static"
-DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(Path(__file__).parent.parent / "data")))
+STATIC_DIR = _APP_DIR / "static"
+DATA_DIR = Path(os.environ.get("ZONE_DATA_DIR", str(_PROJECT_ROOT / "data")))
 ZONE_USERNAME = os.environ.get("ZONE_USERNAME", "").strip() or "admin"
 ZONE_PASSWORD = os.environ.get("ZONE_PASSWORD", "").strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
