@@ -95,6 +95,23 @@ def detect_environment() -> EnvStatus:
                             status.gh_username = parts[i + 1].strip().rstrip("(")
                             break
 
+        # Fallback: if GH_TOKEN is set, use it even if `gh auth status` fails
+        if not status.gh_authenticated and GH_TOKEN:
+            status.gh_authenticated = True
+            # Get username from GitHub API
+            import urllib.request, urllib.error
+            try:
+                req = urllib.request.Request("https://api.github.com/user", headers={
+                    "Authorization": f"token {GH_TOKEN}",
+                    "Accept": "application/vnd.github+json"
+                })
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                    status.gh_username = data.get("login", "")
+            except Exception as e:
+                log.warning("GH_TOKEN set but failed to get username: %s", e)
+                status.gh_authenticated = False
+
     # Check if repo exists
     if status.gh_authenticated:
         r = _run(["gh", "repo", "view", f"{status.gh_username}/{REPO_NAME}", "--json", "name,url"])
