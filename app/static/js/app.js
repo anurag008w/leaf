@@ -22,6 +22,7 @@ const ZoneApp = (() => {
     wpStyle: 'mission_control', wpSize: 'mobile',
     audioCtx: null, timerHandle: null, notifAsked: false,
     examCountdownMode: 'full', // full | days | hours | mins | secs
+    examStartDate: null, // first login timestamp — ring depletes from here to exam date
     selectedDate: null, // time travel: null = real today, 'YYYY-MM-DD' = selected
     todos: []
   };
@@ -308,6 +309,7 @@ const ZoneApp = (() => {
     storage().set('settings', state.settings);
     storage().set('examTrack', state.examTrack);
     storage().set('examDates', state.examDates);
+    storage().set('examStartDate', state.examStartDate);
     storage().set('todos', state.todos);
     if (isGuest()) return;
     if (now - _lastHttpSave < 5000) {
@@ -2880,18 +2882,21 @@ const ZoneApp = (() => {
       { key: 'secs', label: 'Secs' }
     ];
 
-    // Ring depletes based on remaining days vs a 365-day reference period
-    // Full ring when 365+ days left → empties as exam approaches → empty on exam day
-    function getRingFrac(diff) {
+    // Ring depletes from 100% (first login) to 0% (exam day)
+    // frac = (examDate - now) / (examDate - startDate)
+    function getRingFrac(examTs) {
+      const diff = examTs - now;
       if (diff <= 0) return 0;
-      const days = diff / 86400000;
-      return Math.min(1, days / 365);
+      const startTs = state.examStartDate || now;
+      const totalSpan = examTs - startTs;
+      if (totalSpan <= 0) return 1; // start is after exam → show full
+      return Math.min(1, Math.max(0, diff / totalSpan));
     }
 
     function ringSVG(target) {
       const diff = target - now;
       if (diff <= 0) return '';
-      const frac = getRingFrac(diff);
+      const frac = getRingFrac(target);
       const r = 80, ar = r - 10, c = 2 * Math.PI * ar, size = 220, cx = 110, cy = 110;
       const offset = c * (1 - frac);
       return `<svg width="${size}" height="${size}" viewBox="0 0 220 220" class="exam-ring-svg">
@@ -3006,8 +3011,9 @@ const ZoneApp = (() => {
 
       const ring = card.querySelector('.exam-ring-svg circle:last-child');
       if (ring) {
-        const days = diff / 86400000;
-        const frac = Math.min(1, days / 365);
+        const startTs = state.examStartDate || Date.now();
+        const totalSpan = target - startTs;
+        const frac = totalSpan > 0 ? Math.min(1, Math.max(0, diff / totalSpan)) : 1;
         const c = 2 * Math.PI * 70;
         ring.setAttribute('stroke-dashoffset', c * (1 - frac));
       }
@@ -4672,6 +4678,10 @@ const ZoneApp = (() => {
         storage().set('examDates', serverData.examDates);
         state.examDates = serverData.examDates;
       }
+      if (serverData.examStartDate) {
+        storage().set('examStartDate', serverData.examStartDate);
+        state.examStartDate = serverData.examStartDate;
+      }
       if (Array.isArray(serverData.todos)) {
         storage().set('todos', serverData.todos);
         state.todos = serverData.todos;
@@ -4705,12 +4715,22 @@ const ZoneApp = (() => {
       const savedExamDates = storage().get('examDates');
       if (savedExamDates) state.examDates = savedExamDates;
 
+      const savedExamStartDate = storage().get('examStartDate');
+      if (savedExamStartDate) state.examStartDate = savedExamStartDate;
+
       const savedTodos = storage().get('todos');
       if (Array.isArray(savedTodos)) state.todos = savedTodos;
 
       if (storage().get('onboarded')) {
         state.onboarded = true;
       }
+    }
+    // Set examStartDate on first login only — never overwrite once saved
+    if (!state.examStartDate) {
+      state.examStartDate = Date.now();
+      storage().set('examStartDate', state.examStartDate);
+      // Persist to server too (fire-and-forget)
+      if (!isGuest()) fetch('/api/user-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'examStartDate', value: state.examStartDate }) }).catch(() => {});
     }
     // Always init theme effects
     applyTheme(state.settings.theme || 'hacker');

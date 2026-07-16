@@ -233,7 +233,7 @@ def resolve_username(token: str) -> str | None:
         return None
     return _token_users.get(token)
 
-USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "onboarded", "todos"})
+USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "examStartDate", "onboarded", "todos"})
 
 # Default values per key — prevents _read_json returning {} for list-valued keys
 # when the file is missing/empty/corrupt (which crashes the JS spread operator).
