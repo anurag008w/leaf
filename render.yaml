@@ -1,0 +1,38 @@
+# Render Blueprint — Zone Study OS
+# Deploy: render.com → New → Blueprint → connect repo
+#
+# Free tier: spins down after 15min idle. Use cron-job.org keepalive to stay alive.
+# Paid tier (Starter $7/mo): never spins down, persistent disk available.
+
+services:
+  - type: web
+    name: zone-study-os
+    runtime: docker
+    plan: starter           # change to "free" for testing (15min spin-down)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ZONE_USERNAME
+        value: admin
+      - key: ZONE_PASSWORD
+        generateValue: true          # auto-generates secure password
+      - key: ZONE_DATA_DIR
+        value: /data
+      - key: GITHUB_SYNC_ENABLED
+        value: "true"
+      - key: GITHUB_SYNC_INTERVAL
+        value: "300"
+      # Optional: set these for GitHub sync
+      # - key: GITHUB_REPO
+      #   value: zone-data-backup
+      # Optional: set these for HF backup sync
+      # - key: HF_TOKEN
+      #   sync: false
+      # - key: HF_USERNAME
+      #   sync: false
+      # - key: SYNC_DATASET
+      #   value: myos-backup
+    disk:
+      name: zone-data
+      mountPath: /data
+      sizeGB: 1

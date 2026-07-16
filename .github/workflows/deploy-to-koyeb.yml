@@ -1,0 +1,34 @@
+name: Deploy to Koyeb
+
+# Auto-deploys to Koyeb on every push to main.
+# Requires repository secret:
+#   KOYEB_API_TOKEN — Koyeb API token (app.koyeb.com → Settings → API Tokens)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy-to-koyeb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install and configure Koyeb CLI
+        uses: koyeb-community/koyeb-actions@v2
+        with:
+          api_token: "${{ secrets.KOYEB_API_TOKEN }}"
+
+      - name: Deploy to Koyeb
+        uses: koyeb/action-git-deploy@v1
+        with:
+          app-name: zone-study-os
+          service-name: zone-study-os
+          service-type: web
+          service-ports: "7860:http"
+          service-routes: "/:7860"
+          service-env: "ZONE_DATA_DIR=/data,GITHUB_SYNC_ENABLED=true"
+          service-instance-type: nano
+          service-regions: fra

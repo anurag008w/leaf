@@ -1,0 +1,33 @@
+name: Deploy to Render
+
+# Auto-deploys to Render on every push to main.
+# Requires repository secret:
+#   RENDER_API_KEY — Render API key (render.com → Account → API Keys)
+#
+# Note: Render auto-deploys when connected to GitHub repo.
+# This workflow is for manual deploy trigger via API.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  deploy-to-render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "RENDER_API_KEY not set. Render auto-deploys from GitHub — connect your repo at render.com."
+            echo "For manual deploys, get API key from: render.com → Account → API Keys"
+            exit 0
+          fi
+
+          echo "Triggering Render deploy..."
+          curl -s -X POST \
+            "https://api.deploy.render.com/v1/services/service-srv0xxxxx/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json"
+
+          echo "Deploy triggered! Check render.com dashboard for status."
