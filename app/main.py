@@ -76,7 +76,8 @@ IS_LOCAL = SPACE_ID == ""
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 10     # max attempts per window
-TOKEN_EXPIRY_SECONDS = 86400 * 30  # 30 days, matching cookie max_age
+TOKEN_EXPIRY_SECONDS = 86400 * 7  # 7 days
+MAX_SESSIONS_TOTAL = 50           # global cap across all users
 
 def rate_limit_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -298,27 +299,33 @@ def save_reset_keys(keys: list) -> None:
 def make_secure_cookie(resp, token: str) -> None:
     resp.set_cookie(
         COOKIE_NAME, token,
-        max_age=86400 * 30,
+        max_age=86400 * 7,
         httponly=True,
         samesite="lax",
         secure=not IS_LOCAL,
     )
 
 def make_session(username: str) -> str:
+    # Evict ALL old sessions for this user before creating a new one
+    old_tokens = [t for t, u in _token_users.items() if u == username]
+    for old_token in old_tokens:
+        _active_tokens.discard(old_token)
+        _token_users.pop(old_token, None)
+        _token_created.pop(old_token, None)
+
     token = secrets.token_hex(32)
     _active_tokens.add(token)
     _token_users[token] = username
     _token_created[token] = time.time()
-    # Cap per-user sessions to prevent unbounded growth
-    MAX_SESSIONS_PER_USER = 20
-    user_tokens = [t for t, u in _token_users.items() if u == username]
-    if len(user_tokens) > MAX_SESSIONS_PER_USER:
-        # Evict oldest sessions
-        user_tokens.sort(key=lambda t: _token_created.get(t, 0))
-        for old_token in user_tokens[:len(user_tokens) - MAX_SESSIONS_PER_USER]:
+
+    # Global cap to prevent unbounded growth
+    if len(_active_tokens) > MAX_SESSIONS_TOTAL:
+        by_age = sorted(_active_tokens, key=lambda t: _token_created.get(t, 0))
+        for old_token in by_age[:len(_active_tokens) - MAX_SESSIONS_TOTAL]:
             _active_tokens.discard(old_token)
             _token_users.pop(old_token, None)
             _token_created.pop(old_token, None)
+
     save_sessions()
     return token
 
