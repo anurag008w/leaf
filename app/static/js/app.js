@@ -3670,23 +3670,26 @@ const ZoneApp = (() => {
     _themeFxCanvas.height = window.innerHeight;
   }
 
-  function getThemeFx(theme) {
+    function getThemeFx(theme) {
     const c = _themeFxCtx;
     const w = () => _themeFxCanvas?.width || 0;
     const h = () => _themeFxCanvas?.height || 0;
 
+    /* ─── HACKER: matrix rain + glow trails ─── */
     if (theme === 'hacker') {
       const cols = [];
+      const trail = []; /* glow trail particles */
       const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789<>/{}[]|&^%$#@!';
       return {
         init() {
-          const n = Math.max(40, Math.floor(w() / 15));
+          const n = Math.max(50, Math.floor(w() / 12));
           for (let i = 0; i < n; i++) {
             cols.push({
               x: i * (w() / n) + Math.random() * 10,
               y: Math.random() * h() * -1,
-              speed: 1.5 + Math.random() * 3,
-              len: 8 + Math.floor(Math.random() * 20),
+              speed: 1.8 + Math.random() * 3.5,
+              len: 10 + Math.floor(Math.random() * 25),
+              burst: false,
             });
           }
         },
@@ -3696,8 +3699,26 @@ const ZoneApp = (() => {
             if (col.y - col.len * 14 > h()) {
               col.y = -col.len * 14;
               col.x = Math.random() * w();
-              col.speed = 1.5 + Math.random() * 3;
+              col.speed = 1.8 + Math.random() * 3.5;
+              col.burst = Math.random() < 0.08; /* occasional burst */
+              if (col.burst) col.len = 20 + Math.floor(Math.random() * 30);
+              else col.len = 10 + Math.floor(Math.random() * 25);
             }
+          }
+          /* spawn glow trail from bright heads */
+          if (Math.random() < 0.15) {
+            const col = cols[Math.floor(Math.random() * cols.length)];
+            trail.push({
+              x: col.x + Math.random() * 8 - 4,
+              y: col.y,
+              r: 1 + Math.random() * 2,
+              life: 1,
+            });
+          }
+          for (let i = trail.length - 1; i >= 0; i--) {
+            trail[i].life -= 0.04;
+            trail[i].r += 0.05;
+            if (trail[i].life <= 0) trail.splice(i, 1);
           }
         },
         draw() {
@@ -3709,27 +3730,53 @@ const ZoneApp = (() => {
               if (y < 0 || y > h()) continue;
               const ch = chars[Math.floor(Math.random() * chars.length)];
               const alpha = 1 - (i / col.len) * 0.85;
-              c.fillStyle = i === 0 ? `rgba(200,255,200,${Math.min(1,alpha+0.3)})`
-                : `rgba(52,211,153,${alpha * 0.7})`;
+              const isHead = i === 0;
+              const isBurstHead = isHead && col.burst;
+              if (isBurstHead) {
+                c.fillStyle = `rgba(180,255,180,${Math.min(1, alpha + 0.5)})`;
+                c.shadowColor = 'rgba(52,211,153,0.8)';
+                c.shadowBlur = 8;
+              } else if (isHead) {
+                c.fillStyle = `rgba(200,255,200,${Math.min(1, alpha + 0.3)})`;
+                c.shadowColor = 'rgba(52,211,153,0.4)';
+                c.shadowBlur = 4;
+              } else {
+                c.fillStyle = `rgba(52,211,153,${alpha * 0.7})`;
+                c.shadowColor = 'transparent';
+                c.shadowBlur = 0;
+              }
               c.fillText(ch, col.x, y);
             }
+          }
+          c.shadowBlur = 0;
+          /* draw glow trails */
+          for (const t of trail) {
+            const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, t.r * 4);
+            grad.addColorStop(0, `rgba(52,211,153,${t.life * 0.35})`);
+            grad.addColorStop(1, 'rgba(52,211,153,0)');
+            c.beginPath();
+            c.arc(t.x, t.y, t.r * 4, 0, Math.PI * 2);
+            c.fillStyle = grad;
+            c.fill();
           }
         }
       };
     }
 
+    /* ─── CYBERPUNK: neon particles + connections + pulse bursts ─── */
     if (theme === 'cyber') {
       const particles = [];
+      const pulses = [];
       return {
         init() {
-          const n = Math.min(80, Math.floor(w() * h() / 12000));
+          const n = Math.min(110, Math.floor(w() * h() / 9000));
           for (let i = 0; i < n; i++) {
             particles.push({
               x: Math.random() * w(), y: Math.random() * h(),
-              vx: (Math.random() - 0.5) * 0.6,
-              vy: (Math.random() - 0.5) * 0.6,
+              vx: (Math.random() - 0.5) * 0.7,
+              vy: (Math.random() - 0.5) * 0.7,
               r: 1.5 + Math.random() * 3,
-              hue: Math.random() < 0.5 ? 270 : 190,
+              hue: [270, 190, 310][Math.floor(Math.random() * 3)], /* purple, cyan, pink */
               life: 0.5 + Math.random() * 0.5,
             });
           }
@@ -3743,7 +3790,21 @@ const ZoneApp = (() => {
             if (p.life <= 0) {
               p.x = Math.random() * w(); p.y = Math.random() * h();
               p.life = 0.5 + Math.random() * 0.5;
+              p.hue = [270, 190, 310][Math.floor(Math.random() * 3)];
             }
+          }
+          /* random pulse burst */
+          if (Math.random() < 0.008) {
+            pulses.push({
+              x: Math.random() * w(), y: Math.random() * h(),
+              r: 0, maxR: 60 + Math.random() * 80, life: 1,
+              hue: [270, 190, 310][Math.floor(Math.random() * 3)],
+            });
+          }
+          for (let i = pulses.length - 1; i >= 0; i--) {
+            pulses[i].r += 2;
+            pulses[i].life -= 0.02;
+            if (pulses[i].life <= 0) pulses.splice(i, 1);
           }
         },
         draw() {
@@ -3751,47 +3812,97 @@ const ZoneApp = (() => {
           for (const p of particles) {
             c.beginPath();
             c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-            c.fillStyle = `hsla(${p.hue},80%,60%,${p.life * 0.4})`;
+            c.fillStyle = `hsla(${p.hue},80%,65%,${p.life * 0.45})`;
+            c.shadowColor = `hsla(${p.hue},80%,65%,0.3)`;
+            c.shadowBlur = 6;
             c.fill();
-            // connect nearby
+            c.shadowBlur = 0;
+            /* connect nearby */
             for (const q of particles) {
               if (p === q) continue;
               const dx = p.x - q.x, dy = p.y - q.y;
               const dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist < 100) {
+              if (dist < 90) {
                 c.beginPath();
                 c.moveTo(p.x, p.y);
                 c.lineTo(q.x, q.y);
-                c.strokeStyle = `hsla(${p.hue},80%,60%,${(1 - dist / 100) * 0.1})`;
+                c.strokeStyle = `hsla(${p.hue},80%,65%,${(1 - dist / 90) * 0.12})`;
                 c.lineWidth = 0.5;
                 c.stroke();
               }
             }
           }
+          /* draw pulse bursts */
+          for (const p of pulses) {
+            c.beginPath();
+            c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            c.strokeStyle = `hsla(${p.hue},80%,65%,${p.life * 0.2})`;
+            c.lineWidth = 1.5;
+            c.stroke();
+            c.beginPath();
+            c.arc(p.x, p.y, p.r * 0.6, 0, Math.PI * 2);
+            c.strokeStyle = `hsla(${p.hue},80%,65%,${p.life * 0.1})`;
+            c.lineWidth = 0.8;
+            c.stroke();
+          }
         }
       };
     }
 
+    /* ─── MIDNIGHT: stars + shooting stars + aurora wave ─── */
     if (theme === 'midnight') {
       const stars = [];
+      const shooting = [];
       return {
         init() {
-          const n = Math.min(100, Math.floor(w() * h() / 10000));
+          const n = Math.min(140, Math.floor(w() * h() / 8000));
           for (let i = 0; i < n; i++) {
             stars.push({
               x: Math.random() * w(), y: Math.random() * h(),
-              r: 0.5 + Math.random() * 2,
+              r: 0.4 + Math.random() * 2,
               phase: Math.random() * Math.PI * 2,
               speed: 0.3 + Math.random() * 0.7,
             });
           }
         },
         update() {
-          // stars twinkle via sin in draw
+          /* random shooting star */
+          if (Math.random() < 0.004) {
+            shooting.push({
+              x: Math.random() * w() * 0.8,
+              y: Math.random() * h() * 0.5,
+              vx: 4 + Math.random() * 5,
+              vy: 1 + Math.random() * 2,
+              len: 40 + Math.random() * 60,
+              life: 1,
+            });
+          }
+          for (let i = shooting.length - 1; i >= 0; i--) {
+            const s = shooting[i];
+            s.x += s.vx; s.y += s.vy;
+            s.life -= 0.025;
+            if (s.life <= 0 || s.x > w() + 20) shooting.splice(i, 1);
+          }
         },
         draw() {
           c.clearRect(0, 0, w(), h());
           const t = Date.now() / 1000;
+
+          /* aurora wave — very subtle background */
+          const aY = h() * 0.3;
+          c.beginPath();
+          c.moveTo(0, aY);
+          for (let x = 0; x <= w(); x += 8) {
+            const y = aY + Math.sin(x * 0.008 + t * 0.3) * 20 + Math.sin(x * 0.003 + t * 0.15) * 15;
+            c.lineTo(x, y);
+          }
+          c.lineTo(w(), h());
+          c.lineTo(0, h());
+          c.closePath();
+          c.fillStyle = 'rgba(96,165,250,0.015)';
+          c.fill();
+
+          /* stars */
           for (const s of stars) {
             const alpha = 0.2 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
             if (alpha < 0.15) continue;
@@ -3806,50 +3917,87 @@ const ZoneApp = (() => {
               c.fill();
             }
           }
+
+          /* shooting stars */
+          for (const s of shooting) {
+            const tailX = s.x - (s.vx / Math.sqrt(s.vx*s.vx + s.vy*s.vy)) * s.len;
+            const tailY = s.y - (s.vy / Math.sqrt(s.vx*s.vx + s.vy*s.vy)) * s.len;
+            const grad = c.createLinearGradient(tailX, tailY, s.x, s.y);
+            grad.addColorStop(0, 'rgba(150,200,255,0)');
+            grad.addColorStop(1, `rgba(150,200,255,${s.life * 0.7})`);
+            c.beginPath();
+            c.moveTo(tailX, tailY);
+            c.lineTo(s.x, s.y);
+            c.strokeStyle = grad;
+            c.lineWidth = 1.5;
+            c.stroke();
+            /* head glow */
+            c.beginPath();
+            c.arc(s.x, s.y, 2, 0, Math.PI * 2);
+            c.fillStyle = `rgba(200,220,255,${s.life * 0.9})`;
+            c.fill();
+          }
         }
       };
     }
 
+    /* ─── AMBER: embers + color variation + glow intensity ─── */
     if (theme === 'amber') {
       const embers = [];
       return {
         init() {
-          const n = Math.min(35, Math.floor(w() / 30));
+          const n = Math.min(50, Math.floor(w() / 22));
           for (let i = 0; i < n; i++) {
             embers.push({
               x: Math.random() * w(), y: h() + 20 + Math.random() * 60,
-              vx: (Math.random() - 0.5) * 0.4,
-              vy: -(0.5 + Math.random() * 1.2),
-              r: 2 + Math.random() * 3,
-              opacity: 0.3 + Math.random() * 0.4,
-              drift: Math.random() * 0.3,
+              vx: (Math.random() - 0.5) * 0.5,
+              vy: -(0.6 + Math.random() * 1.5),
+              r: 2 + Math.random() * 4,
+              opacity: 0.3 + Math.random() * 0.5,
+              drift: Math.random() * 0.4,
+              /* color variation: warm amber → orange → white-hot */
+              temp: Math.random(),
             });
           }
         },
         update() {
           for (const e of embers) {
-            e.x += e.vx + Math.sin(Date.now() / 1000 * e.drift) * 0.2;
+            e.x += e.vx + Math.sin(Date.now() / 1000 * e.drift) * 0.3;
             e.y += e.vy;
-            e.vy -= 0.003;
-            e.opacity -= 0.002;
-            if (e.opacity <= 0 || e.y < -20) {
+            e.vy -= 0.004;
+            e.opacity -= 0.0015;
+            if (e.opacity <= 0 || e.y < -30) {
               e.x = Math.random() * w();
-              e.y = h() + 20 + Math.random() * 40;
-              e.vy = -(0.5 + Math.random() * 1.2);
-              e.opacity = 0.3 + Math.random() * 0.4;
-              e.r = 2 + Math.random() * 3;
+              e.y = h() + 20 + Math.random() * 50;
+              e.vy = -(0.6 + Math.random() * 1.5);
+              e.opacity = 0.3 + Math.random() * 0.5;
+              e.r = 2 + Math.random() * 4;
+              e.temp = Math.random();
             }
           }
         },
         draw() {
           c.clearRect(0, 0, w(), h());
           for (const e of embers) {
-            const grad = c.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r * 2);
-            grad.addColorStop(0, `rgba(251,191,36,${e.opacity * 0.8})`);
-            grad.addColorStop(0.5, `rgba(251,146,60,${e.opacity * 0.3})`);
-            grad.addColorStop(1, `rgba(251,146,60,0)`);
+            const grad = c.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r * 2.5);
+            if (e.temp < 0.3) {
+              /* white-hot core */
+              grad.addColorStop(0, `rgba(255,235,200,${e.opacity * 0.9})`);
+              grad.addColorStop(0.4, `rgba(251,191,36,${e.opacity * 0.4})`);
+              grad.addColorStop(1, 'rgba(251,146,60,0)');
+            } else if (e.temp < 0.7) {
+              /* warm amber */
+              grad.addColorStop(0, `rgba(251,191,36,${e.opacity * 0.8})`);
+              grad.addColorStop(0.5, `rgba(251,146,60,${e.opacity * 0.3})`);
+              grad.addColorStop(1, 'rgba(251,146,60,0)');
+            } else {
+              /* deep orange */
+              grad.addColorStop(0, `rgba(251,146,60,${e.opacity * 0.7})`);
+              grad.addColorStop(0.5, `rgba(194,65,12,${e.opacity * 0.25})`);
+              grad.addColorStop(1, 'rgba(194,65,12,0)');
+            }
             c.beginPath();
-            c.arc(e.x, e.y, e.r * 2, 0, Math.PI * 2);
+            c.arc(e.x, e.y, e.r * 2.5, 0, Math.PI * 2);
             c.fillStyle = grad;
             c.fill();
           }
@@ -3857,30 +4005,48 @@ const ZoneApp = (() => {
       };
     }
 
+    /* ─── CORPORATE: floating data segments + moving nodes ─── */
     if (theme === 'corporate') {
-      const lines = [];
+      const segs = [];
+      const nodes = [];
       return {
         init() {
-          const n = Math.min(30, Math.floor(w() / 50));
-          for (let i = 0; i < n; i++) {
-            lines.push({
+          const nSegs = Math.min(45, Math.floor(w() / 40));
+          for (let i = 0; i < nSegs; i++) {
+            segs.push({
               x1: Math.random() * w(), y1: Math.random() * h(),
-              len: 40 + Math.random() * 120,
+              len: 40 + Math.random() * 140,
               angle: -0.3 + Math.random() * 0.6,
               opacity: 0.03 + Math.random() * 0.06,
-              speed: 0.1 + Math.random() * 0.3,
+              speed: 0.15 + Math.random() * 0.35,
+            });
+          }
+          const nNodes = Math.min(20, Math.floor(w() / 100));
+          for (let i = 0; i < nNodes; i++) {
+            nodes.push({
+              x: Math.random() * w(), y: Math.random() * h(),
+              r: 2 + Math.random() * 3,
+              vx: (Math.random() - 0.5) * 0.3,
+              vy: (Math.random() - 0.5) * 0.3,
+              pulse: Math.random() * Math.PI * 2,
             });
           }
         },
         update() {
-          for (const l of lines) {
+          for (const l of segs) {
             l.x1 += l.speed;
             if (l.x1 > w() + l.len) l.x1 = -l.len;
+          }
+          for (const n of nodes) {
+            n.x += n.vx; n.y += n.vy;
+            n.pulse += 0.03;
+            if (n.x < 0 || n.x > w()) n.vx *= -1;
+            if (n.y < 0 || n.y > h()) n.vy *= -1;
           }
         },
         draw() {
           c.clearRect(0, 0, w(), h());
-          for (const l of lines) {
+          for (const l of segs) {
             const x2 = l.x1 + Math.cos(l.angle) * l.len;
             const y2 = l.y1 + Math.sin(l.angle) * l.len;
             c.beginPath();
@@ -3890,42 +4056,114 @@ const ZoneApp = (() => {
             c.lineWidth = 1;
             c.stroke();
           }
+          /* data nodes */
+          for (const n of nodes) {
+            const pulseAlpha = 0.15 + 0.1 * Math.sin(n.pulse);
+            c.beginPath();
+            c.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+            c.fillStyle = `rgba(37,99,235,${pulseAlpha})`;
+            c.fill();
+            c.beginPath();
+            c.arc(n.x, n.y, n.r * 2.5, 0, Math.PI * 2);
+            c.fillStyle = `rgba(37,99,235,${pulseAlpha * 0.2})`;
+            c.fill();
+          }
+          /* connect close nodes */
+          for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+              const dx = nodes[i].x - nodes[j].x;
+              const dy = nodes[i].y - nodes[j].y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 150) {
+                c.beginPath();
+                c.moveTo(nodes[i].x, nodes[i].y);
+                c.lineTo(nodes[j].x, nodes[j].y);
+                c.strokeStyle = `rgba(37,99,235,${(1 - dist / 150) * 0.06})`;
+                c.lineWidth = 0.5;
+                c.stroke();
+              }
+            }
+          }
         }
       };
     }
 
+    /* ─── PLATINUM: 4-point star sparkles + shimmer sweep ─── */
     if (theme === 'platinum') {
       const sparkles = [];
+      const sweep = { x: -100 };
       return {
         init() {
-          const n = Math.min(40, Math.floor(w() / 30));
+          const n = Math.min(55, Math.floor(w() / 22));
           for (let i = 0; i < n; i++) {
             sparkles.push({
               x: Math.random() * w(), y: Math.random() * h(),
-              r: 0.5 + Math.random() * 1.5,
+              r: 0.5 + Math.random() * 2,
               phase: Math.random() * Math.PI * 2,
-              speed: 0.5 + Math.random() * 1.5,
-              gold: Math.random() < 0.5,
+              speed: 0.4 + Math.random() * 1.2,
+              gold: Math.random() < 0.55,
+              spikes: Math.random() < 0.4, /* 4-point star vs dot */
+              rotation: Math.random() * Math.PI * 2,
+              rotSpeed: (Math.random() - 0.5) * 0.02,
             });
           }
         },
-        update() { /* twinkle via sin in draw */ },
+        update() {
+          sweep.x += 1.5;
+          if (sweep.x > w() + 200) sweep.x = -200;
+          for (const s of sparkles) {
+            s.rotation += s.rotSpeed;
+          }
+        },
         draw() {
           c.clearRect(0, 0, w(), h());
           const t = Date.now() / 1000;
+
+          /* shimmer sweep */
+          const grad = c.createLinearGradient(sweep.x - 60, 0, sweep.x + 60, 0);
+          grad.addColorStop(0, 'rgba(255,255,255,0)');
+          grad.addColorStop(0.5, 'rgba(255,255,255,0.03)');
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          c.fillStyle = grad;
+          c.fillRect(sweep.x - 60, 0, 120, h());
+
+          /* sparkles */
           for (const s of sparkles) {
             const alpha = 0.15 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
             if (alpha < 0.1) continue;
-            c.beginPath();
-            c.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-            c.fillStyle = s.gold ? `rgba(251,191,36,${alpha * 0.5})` : `rgba(209,213,219,${alpha * 0.5})`;
-            c.fill();
-            if (s.r > 1) {
+            const baseColor = s.gold ? [212,175,55] : [209,213,219];
+
+            if (s.spikes) {
+              /* 4-point star */
+              c.save();
+              c.translate(s.x, s.y);
+              c.rotate(s.rotation);
               c.beginPath();
-              c.arc(s.x, s.y, s.r * 3, 0, Math.PI * 2);
-              c.fillStyle = s.gold ? `rgba(251,191,36,${alpha * 0.06})` : `rgba(209,213,219,${alpha * 0.06})`;
+              const outerR = s.r * 3;
+              const innerR = s.r * 0.5;
+              for (let i = 0; i < 8; i++) {
+                const a = (i * Math.PI) / 4;
+                const r = i % 2 === 0 ? outerR : innerR;
+                if (i === 0) c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+                else c.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+              }
+              c.closePath();
+              c.fillStyle = `rgba(${baseColor[0]},${baseColor[1]},${baseColor[2]},${alpha * 0.5})`;
+              c.fill();
+              c.restore();
+            } else {
+              /* dot sparkle */
+              c.beginPath();
+              c.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+              c.fillStyle = `rgba(${baseColor[0]},${baseColor[1]},${baseColor[2]},${alpha * 0.5})`;
               c.fill();
             }
+
+            /* glow halo */
+            c.beginPath();
+            c.arc(s.x, s.y, s.r * 4, 0, Math.PI * 2);
+            c.fillStyle = `rgba(${baseColor[0]},${baseColor[1]},${baseColor[2]},${alpha * 0.06})`;
+            c.fill();
           }
         }
       };
