@@ -23,6 +23,7 @@ const ZoneApp = (() => {
     audioCtx: null, timerHandle: null, notifAsked: false,
     examCountdownMode: 'full', // full | days | hours | mins | secs
     examStartDate: null, // first login timestamp — ring depletes from here to exam date
+    diary: [],
     selectedDate: null, // time travel: null = real today, 'YYYY-MM-DD' = selected
     todos: []
   };
@@ -74,6 +75,252 @@ const ZoneApp = (() => {
   }
   function todayKey() { return state.selectedDate || localDateKey(); }
   function realTodayKey() { return localDateKey(); }
+
+  // ─── AMBIENT SOUND ENGINE ──────────────────────
+  let _ambientCtx = null;
+  let _ambientNodes = {};
+  let _ambientActive = null;
+
+  function getAmbientCtx() {
+    if (!_ambientCtx) _ambientCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return _ambientCtx;
+  }
+
+  function stopAmbient() {
+    if (_ambientNodes._intervals) _ambientNodes._intervals.forEach(id => clearInterval(id));
+    Object.values(_ambientNodes).forEach(n => { try { n.stop?.(); n.disconnect?.(); } catch {} });
+    _ambientNodes = {};
+    if (_ambientCtx && _ambientCtx.state === 'running') { try { _ambientCtx.suspend(); } catch {} }
+    _ambientActive = null;
+  }
+
+  /* ── REALISTIC AMBIENT SOUNDS ─────────────────── */
+  function playAmbient(type) {
+    stopAmbient();
+    if (_ambientActive === type) { _ambientActive = null; return; }
+    _ambientActive = type;
+    const ctx = getAmbientCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const master = ctx.createGain();
+    master.gain.value = 0.35;
+    master.connect(ctx.destination);
+    _ambientNodes.gain = master;
+    _ambientNodes._intervals = [];
+
+    /* ── Rain ─────────────────────────────────── */
+    if (type === 'rain') {
+      // Layer 1: Heavy rain base (brownian noise = deeply filtered white)
+      const bufLen = 4 * ctx.sampleRate;
+      const buf = ctx.createBuffer(2, bufLen, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        let last = 0;
+        for (let i = 0; i < bufLen; i++) {
+          const white = Math.random() * 2 - 1;
+          last = (last + (0.02 * white)) / 1.02;
+          d[i] = last * 3.5 + white * 0.08;
+        }
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1200; lp.Q.value = 0.5;
+      const rainGain = ctx.createGain(); rainGain.gain.value = 0.7;
+      src.connect(lp); lp.connect(rainGain); rainGain.connect(master);
+      src.start(); _ambientNodes.rain_base = src;
+
+      // Layer 2: High hiss — raindrops hitting surfaces
+      const hissBuf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const hd = hissBuf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) hd[i] = Math.random() * 2 - 1;
+      const hissSrc = ctx.createBufferSource();
+      hissSrc.buffer = hissBuf; hissSrc.loop = true;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 4000; hp.Q.value = 0.3;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 7000; bp.Q.value = 0.8;
+      const hissGain = ctx.createGain(); hissGain.gain.value = 0.12;
+      hissSrc.connect(hp); hp.connect(bp); bp.connect(hissGain); hissGain.connect(master);
+      hissSrc.start(); _ambientNodes.rain_hiss = hissSrc;
+
+      // Layer 3: Random drip sounds via oscillator pings
+      function makeDrip() {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 2000 + Math.random() * 4000;
+        const g = ctx.createGain();
+        const now = ctx.currentTime;
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(0.06 + Math.random() * 0.04, now + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.03 + Math.random() * 0.04);
+        osc.connect(g); g.connect(master);
+        osc.start(now); osc.stop(now + 0.08);
+      }
+      const dripLoop = setInterval(makeDrip, 150 + Math.random() * 300);
+      _ambientNodes._intervals.push(dripLoop);
+
+    /* ── Lo-fi Beats ───────────────────────────── */
+    } else if (type === 'lofi') {
+      // Warm pad: 3 detuned oscillators for that lo-fi warmth
+      const chords = [
+        [261.63, 329.63, 392.00],  // C major
+        [220.00, 277.18, 329.63],  // A minor-ish
+        [246.94, 311.13, 369.99],  // B minor-ish
+      ];
+      const padGain = ctx.createGain(); padGain.gain.value = 0.15;
+      const loPass = ctx.createBiquadFilter();
+      loPass.type = 'lowpass'; loPass.frequency.value = 1200; loPass.Q.value = 1.0;
+      padGain.connect(loPass); loPass.connect(master);
+
+      const oscs = [];
+      chords[0].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.detune.value = (i - 1) * 8; // slight detune for warmth
+        const g = ctx.createGain(); g.gain.value = 0.33;
+        osc.connect(g); g.connect(padGain);
+        osc.start(); oscs.push(osc);
+      });
+      _ambientNodes.lofi_osc1 = oscs[0];
+      _ambientNodes.lofi_osc2 = oscs[1];
+      _ambientNodes.lofi_osc3 = oscs[2];
+
+      // Sub bass — warm sine wave
+      const sub = ctx.createOscillator();
+      sub.type = 'sine'; sub.frequency.value = 65.41; // C2
+      const subG = ctx.createGain(); subG.gain.value = 0.18;
+      sub.connect(subG); subG.connect(master);
+      sub.start(); _ambientNodes.lofi_sub = sub;
+
+      // Vinyl crackle: brownian noise + random pops
+      const crBuf = ctx.createBuffer(1, 4 * ctx.sampleRate, ctx.sampleRate);
+      const cd = crBuf.getChannelData(0);
+      let crLast = 0;
+      for (let i = 0; i < cd.length; i++) {
+        const w = Math.random() * 2 - 1;
+        crLast = (crLast + (0.01 * w)) / 1.01;
+        cd[i] = crLast * 2;
+        if (Math.random() < 0.0003) cd[i] += (Math.random() - 0.5) * 0.6;
+      }
+      const crSrc = ctx.createBufferSource();
+      crSrc.buffer = crBuf; crSrc.loop = true;
+      const crFilter = ctx.createBiquadFilter();
+      crFilter.type = 'bandpass'; crFilter.frequency.value = 3000; crFilter.Q.value = 0.5;
+      const crGain = ctx.createGain(); crGain.gain.value = 0.25;
+      crSrc.connect(crFilter); crFilter.connect(crGain); crGain.connect(master);
+      crSrc.start(); _ambientNodes.lofi_crackle = crSrc;
+
+      // Slow chord drift
+      let chordIdx = 0;
+      const driftLoop = setInterval(() => {
+        chordIdx = (chordIdx + 1) % chords.length;
+        const now = ctx.currentTime;
+        oscs.forEach((o, i) => {
+          o.frequency.linearRampToValueAtTime(chords[chordIdx][i], now + 4);
+        });
+      }, 8000);
+      _ambientNodes._intervals.push(driftLoop);
+
+    /* ── White / Pink Noise ──────────────────── */
+    } else if (type === 'whitenoise') {
+      // Pink noise (1/f) — more natural sounding than pure white
+      const bufLen = 4 * ctx.sampleRate;
+      const buf = ctx.createBuffer(2, bufLen, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufLen; i++) {
+          const w = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + w * 0.0555179;
+          b1 = 0.99332 * b1 + w * 0.0750759;
+          b2 = 0.96900 * b2 + w * 0.1538520;
+          b3 = 0.86650 * b3 + w * 0.3104856;
+          b4 = 0.55000 * b4 + w * 0.5329522;
+          b5 = -0.7616 * b5 - w * 0.0168980;
+          d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.22;
+          b6 = w * 0.115926;
+        }
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 8000;
+      src.connect(lp); lp.connect(master);
+      src.start(); _ambientNodes.wn = src;
+
+    /* ── Café / Coffee Shop ─────────────────── */
+    } else if (type === 'cafe') {
+      // Layer 1: Low rumble of room tone (deep brownian noise)
+      const roomLen = 4 * ctx.sampleRate;
+      const roomBuf = ctx.createBuffer(2, roomLen, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = roomBuf.getChannelData(ch);
+        let last = 0;
+        for (let i = 0; i < roomLen; i++) {
+          const w = Math.random() * 2 - 1;
+          last = (last + (0.005 * w)) / 1.005;
+          d[i] = last * 6;
+        }
+      }
+      const roomSrc = ctx.createBufferSource();
+      roomSrc.buffer = roomBuf; roomSrc.loop = true;
+      const roomLp = ctx.createBiquadFilter();
+      roomLp.type = 'lowpass'; roomLp.frequency.value = 400;
+      const roomGain = ctx.createGain(); roomGain.gain.value = 0.4;
+      roomSrc.connect(roomLp); roomLp.connect(roomGain); roomGain.connect(master);
+      roomSrc.start(); _ambientNodes.cafe_room = roomSrc;
+
+      // Layer 2: Muffled chatter (mid-range noise with slow modulation)
+      const chatBuf = ctx.createBuffer(1, roomLen, ctx.sampleRate);
+      const chatd = chatBuf.getChannelData(0);
+      for (let i = 0; i < roomLen; i++) {
+        const mod = 0.5 + 0.5 * Math.sin(i / (ctx.sampleRate * 0.8));
+        chatd[i] = (Math.random() * 2 - 1) * mod;
+      }
+      const chatSrc = ctx.createBufferSource();
+      chatSrc.buffer = chatBuf; chatSrc.loop = true;
+      const chatBp = ctx.createBiquadFilter();
+      chatBp.type = 'bandpass'; chatBp.frequency.value = 600; chatBp.Q.value = 0.6;
+      const chatGain = ctx.createGain(); chatGain.gain.value = 0.2;
+      chatSrc.connect(chatBp); chatBp.connect(chatGain); chatGain.connect(master);
+      chatSrc.start(); _ambientNodes.cafe_chat = chatSrc;
+
+      // Layer 3: Random cup clinks, espresso machine hiss
+      function cafePing() {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        const f = 2000 + Math.random() * 6000;
+        osc.frequency.value = f;
+        const g = ctx.createGain();
+        const now = ctx.currentTime;
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(0.04 + Math.random() * 0.03, now + 0.001);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.01 + Math.random() * 0.03);
+        osc.connect(g); g.connect(master);
+        osc.start(now); osc.stop(now + 0.06);
+      }
+      function cafeHiss() {
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) {
+          d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+        }
+        const s = ctx.createBufferSource();
+        s.buffer = buf;
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass'; hp.frequency.value = 3000;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.06, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        s.connect(hp); hp.connect(g); g.connect(master);
+        s.start();
+      }
+      const pingLoop = setInterval(() => { if (Math.random() < 0.4) cafePing(); }, 800);
+      const hissLoop = setInterval(() => { if (Math.random() < 0.15) cafeHiss(); }, 3000);
+      _ambientNodes._intervals.push(pingLoop, hissLoop);
+    }
+  }
 
   let defaultEventsCache = null;
   let defaultEventsYear = null;
@@ -245,6 +492,7 @@ const ZoneApp = (() => {
     saveUserDataToServer('examTrack');
     saveUserDataToServer('examDates');
     saveUserDataToServer('todos');
+    saveUserDataToServer('diary');
     saveUserDataToServer('onboarded');
     _lastHttpSave = Date.now();
     _pendingHttpSave = null;
@@ -267,12 +515,13 @@ const ZoneApp = (() => {
     storage().set('examTrack', state.examTrack);
     storage().set('examDates', state.examDates);
     storage().set('todos', state.todos);
+    storage().set('diary', state.diary);
     if (isGuest()) return;
     const beaconData = {
       session, stats: state.stats, tracking: state.tracking,
       events: state.events, settings: state.settings,
       examTrack: state.examTrack, examDates: state.examDates,
-      todos: state.todos, examStartDate: state.examStartDate,
+      todos: state.todos, diary: state.diary, examStartDate: state.examStartDate,
       onboarded: state.onboarded
     };
     Object.entries(beaconData).forEach(([k, v]) => {
@@ -312,6 +561,7 @@ const ZoneApp = (() => {
     storage().set('examDates', state.examDates);
     storage().set('examStartDate', state.examStartDate);
     storage().set('todos', state.todos);
+    storage().set('diary', state.diary);
     if (isGuest()) return;
     if (now - _lastHttpSave < 5000) {
       if (!_pendingHttpSave) _pendingHttpSave = setTimeout(_flushHttpSave, 5000 - (now - _lastHttpSave));
@@ -605,6 +855,7 @@ const ZoneApp = (() => {
     const totalFocusMin = Object.values(dailyMap).reduce((s, d) => s + (d.focusMin || 0), 0);
 
     let streak = 0;
+    let bestStreak = 0;
     const dates = Object.keys(dailyMap).sort().reverse();
     for (let i = 0; i < dates.length; i++) {
       // In time travel mode, only count streak up to selected date
@@ -625,6 +876,15 @@ const ZoneApp = (() => {
       }
       streak++;
     }
+
+    // Compute best streak from all history
+    const sortedAllDays = Object.keys(dailyMap).sort();
+    let tempStreak = 0;
+    for (const dk of sortedAllDays) {
+      if ((dailyMap[dk]?.focusMin || 0) >= 30) { tempStreak++; bestStreak = Math.max(bestStreak, tempStreak); }
+      else { tempStreak = 0; }
+    }
+    bestStreak = Math.max(bestStreak, streak);
 
     // Compute zone data — always filter to the relevant date only (today or time-travel date)
     let zoneData;
@@ -665,7 +925,7 @@ const ZoneApp = (() => {
     });
 
     return { todayEvents, sessionsToday, manualToday, skipsToday, focusMinToday,
-      totalSessions, totalManual, totalFocusMin, dailyMap, streak, zoneData, log, monthGroups };
+      totalSessions, totalManual, totalFocusMin, dailyMap, streak, bestStreak, zoneData, log, monthGroups };
   }
 
   // ─── Zone Config ──────────────────────────────
@@ -1227,6 +1487,7 @@ const ZoneApp = (() => {
         <button class="tab-btn ${state.tab === 'calendar' ? 'active' : ''}" onclick="ZoneApp.switchTab('calendar')">CALENDAR</button>
         <button class="tab-btn ${state.tab === 'stats' ? 'active' : ''}" onclick="ZoneApp.switchTab('stats')">STATS</button>
         <button class="tab-btn ${state.tab === 'exam-timer' ? 'active' : ''}" onclick="ZoneApp.switchTab('exam-timer')">EXAM TIMER</button>
+        <button class="tab-btn ${state.tab === 'diary' ? 'active' : ''}" onclick="ZoneApp.switchTab('diary')">DIARY</button>
         <button class="tab-btn ${state.tab === 'settings' ? 'active' : ''}" onclick="ZoneApp.switchTab('settings')">SETTINGS</button>
       </div>
 
@@ -1265,6 +1526,7 @@ const ZoneApp = (() => {
       case 'stats': renderStatsTab(); break;
       case 'exam-timer': renderExamTimerTab(); break;
       case 'todo': if (typeof ZoneApp.renderTodoTab === 'function') ZoneApp.renderTodoTab(); break;
+      case 'diary': if (typeof ZoneApp.renderDiaryTab === 'function') ZoneApp.renderDiaryTab(); break;
       case 'settings': renderSettingsTab(); break;
     }
   }
@@ -1735,12 +1997,41 @@ const ZoneApp = (() => {
 
     area.innerHTML = `
       <div class="timer-area">
-        <div class="ring-section">
-          <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
-            ${ringSVG(frac, color)}
-            <div class="ring-center">
-              <div class="ring-time mono" style="color:${color}">${ringTime}</div>
-              <div class="ring-label">${ringLabel}</div>
+        <div class="timer-left">
+          <div class="ring-section">
+            <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
+              ${ringSVG(frac, color)}
+              <div class="ring-center">
+                <div class="ring-time mono" style="color:${color}">${ringTime}</div>
+                <div class="ring-label">${ringLabel}</div>
+              </div>
+            </div>
+          </div>
+          <div class="timer-extras">
+            <div class="focus-stats-bar">
+              ${(() => {
+                const today = todayKey();
+                const todayEv = (state.tracking.log || []).filter(e => e.date === today);
+                const sess = todayEv.filter(e => e.type === 'session_complete').length;
+                const mins = todayEv.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+                const pauses = todayEv.filter(e => e.type === 'pause').length;
+                const skips = todayEv.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+                return `
+                  <div class="focus-stat-pill"><span class="focus-stat-num blue">${sess}</span><span class="focus-stat-lbl">Sessions</span></div>
+                  <div class="focus-stat-pill"><span class="focus-stat-num">${mins}m</span><span class="focus-stat-lbl">Focus</span></div>
+                  <div class="focus-stat-pill"><span class="focus-stat-num amber">${pauses}</span><span class="focus-stat-lbl">Pauses</span></div>
+                  <div class="focus-stat-pill"><span class="focus-stat-num red">${skips}</span><span class="focus-stat-lbl">Skips</span></div>`;
+              })()}
+            </div>
+            <div class="ambient-panel">
+              ${['rain:🌧:Rain', 'lofi:🎵:Lo-fi', 'whitenoise:☁:Noise', 'cafe:☕:Café'].map(s => {
+                const [id, icon, label] = s.split(':');
+                return `<button class="ambient-btn ${_ambientActive === id ? 'active' : ''}" onclick="ZoneApp.toggleAmbient('${id}')">
+                  <span class="ambient-icon">${icon}</span>${label}
+                </button>`;
+              }).join('')}
+              <input type="range" class="ambient-volume" min="0" max="100" value="30"
+                oninput="ZoneApp.setAmbientVolume(this.value)" title="Volume">
             </div>
           </div>
         </div>
@@ -2426,6 +2717,17 @@ const ZoneApp = (() => {
           </div>
         </div>
 
+        <div class="streak-banner">
+          <span class="streak-fire">🔥</span>
+          <div class="streak-info">
+            <div class="streak-count">${streak} day${streak !== 1 ? 's' : ''}</div>
+            <div class="streak-label">Current Streak</div>
+          </div>
+          <div class="streak-record">
+            Best: ${ts.bestStreak || streak} days
+          </div>
+        </div>
+        ${renderHeatmap(ts)}
         <div class="chart-panel" id="focusChart">
           <div class="chart-title">Daily Focus Minutes — Last 14 Days</div>
           <div class="chart-container"><canvas id="focusLineChart"></canvas></div>
@@ -2784,6 +3086,71 @@ const ZoneApp = (() => {
         compCtx.parentElement.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:30px 0;text-align:center">Start a timer to see completion rate</div>';
       }
     }
+  }
+
+  function renderHeatmap(ts) {
+    const today = new Date();
+    const days = 182; // ~6 months
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - days);
+    // Align to Sunday
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+
+    let cells = '';
+    const monthLabels = [];
+    let lastMonth = -1;
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    for (let i = 0; i <= days + startDate.getDay() + (6 - today.getDay()); i++) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + i);
+      const key = localDateKey(d);
+      const dayData = ts.dailyMap[key];
+      const min = dayData?.focusMin || 0;
+
+      let level = 0;
+      if (min > 0) level = 1;
+      if (min >= 30) level = 2;
+      if (min >= 60) level = 3;
+      if (min >= 120) level = 4;
+
+      const isToday = key === todayKey();
+      const isFuture = d > today;
+      const dateStr = d.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+      if (d.getMonth() !== lastMonth && d.getDate() <= 7) {
+        monthLabels.push({ name: monthNames[d.getMonth()], index: i });
+        lastMonth = d.getMonth();
+      }
+
+      cells += `<div class="heatmap-cell ${isToday ? 'today' : ''}" data-level="${isFuture ? 0 : level}" title="${dateStr}: ${min}min" onclick="${!isFuture ? `ZoneApp.showDayReport('${key}')` : ''}" style="${isFuture ? 'opacity:0.3' : ''}">
+        <div class="heatmap-tooltip">${dateStr}<br><b>${min}min</b> focus</div>
+      </div>`;
+    }
+
+    const dayLabels = ['','Mon','','Wed','','Fri',''];
+
+    return `
+      <div class="heatmap-section">
+        <div class="heatmap-title">📊 Focus Activity — Last 6 Months</div>
+        <div style="display:flex;gap:6px">
+          <div class="heatmap-day-labels">
+            ${dayLabels.map(l => `<span class="heatmap-day-label">${l}</span>`).join('')}
+          </div>
+          <div style="flex:1;overflow-x:auto">
+            <div class="heatmap-grid">${cells}</div>
+          </div>
+        </div>
+        <div class="heatmap-legend">
+          <span class="heatmap-legend-label">Less</span>
+          <div class="heatmap-legend-cell" style="background:var(--bg-3)"></div>
+          <div class="heatmap-legend-cell" style="background:rgba(52,211,153,0.15)"></div>
+          <div class="heatmap-legend-cell" style="background:rgba(52,211,153,0.30)"></div>
+          <div class="heatmap-legend-cell" style="background:rgba(52,211,153,0.50)"></div>
+          <div class="heatmap-legend-cell" style="background:rgba(52,211,153,0.75)"></div>
+          <span class="heatmap-legend-label">More</span>
+        </div>
+      </div>`;
   }
 
   function scrollToChart(id) {
@@ -4567,7 +4934,7 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','diary','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4582,7 +4949,9 @@ const ZoneApp = (() => {
     storage().set('examTrack', null);
     storage().set('examDates', []);
     storage().set('todos', []);
+    storage().set('diary', []);
     state.todos = [];
+    state.diary = [];
     location.reload();
   }
 
@@ -4591,7 +4960,7 @@ const ZoneApp = (() => {
     if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','diary','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -5015,6 +5384,10 @@ const ZoneApp = (() => {
         storage().set('todos', serverData.todos);
         state.todos = serverData.todos;
       }
+      if (Array.isArray(serverData.diary)) {
+        storage().set('diary', serverData.diary);
+        state.diary = serverData.diary;
+      }
       if (serverData.onboarded) {
         storage().set('onboarded', true);
         state.onboarded = true;
@@ -5049,6 +5422,9 @@ const ZoneApp = (() => {
 
       const savedTodos = storage().get('todos');
       if (Array.isArray(savedTodos)) state.todos = savedTodos;
+
+      const savedDiary = storage().get('diary');
+      if (Array.isArray(savedDiary)) state.diary = savedDiary;
 
       if (storage().get('onboarded')) {
         state.onboarded = true;
@@ -5143,7 +5519,7 @@ const ZoneApp = (() => {
     // Restore last active tab from localStorage
     try {
       const savedTab = storage().get('activeTab');
-      if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','settings'].includes(savedTab)) {
+      if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','diary','settings'].includes(savedTab)) {
         state.tab = savedTab;
       }
       const savedStgSection = storage().get('activeStgSection');
@@ -5209,6 +5585,10 @@ const ZoneApp = (() => {
     loadGitHubSyncStatus, _githubPushModal, _githubPullModal,
     _stgNav, _stgToggle, _stgSaved, _zaToggle, _zaSyncTimeline,
     _undoDeleteEvent,
+    toggleAmbient: playAmbient,
+    setAmbientVolume: function(v) {
+      if (_ambientNodes.gain) _ambientNodes.gain.gain.value = v / 100;
+    },
     _ctx: { state, getZones, esc, todayKey, storage, toast, timerStart }
   };
 })();

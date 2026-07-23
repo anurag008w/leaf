@@ -11,8 +11,8 @@ from typing import Any
 from pathlib import Path
 from contextlib import asynccontextmanager
 from collections import defaultdict
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import bcrypt
@@ -233,7 +233,7 @@ def resolve_username(token: str) -> str | None:
         return None
     return _token_users.get(token)
 
-USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "examStartDate", "onboarded", "todos"})
+USER_DATA_KEYS = frozenset({"stats", "tracking", "events", "settings", "session", "examTrack", "examDates", "examStartDate", "onboarded", "todos", "diary"})
 
 # Default values per key — prevents _read_json returning {} for list-valued keys
 # when the file is missing/empty/corrupt (which crashes the JS spread operator).
@@ -454,9 +454,8 @@ app = FastAPI(title="Zone Study OS", version="1.0.0", lifespan=lifespan)
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://hf.space https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'none'; object-src 'none'"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://hf.space https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'self'; object-src 'none'"
     return resp
 
 # ── Auth middleware ───────────────────────────────
@@ -1118,6 +1117,133 @@ async def hub_info():
     if not HUB_ENABLED or not url:
         return {"enabled": False}
     return {"enabled": True, "url": url, "space_id": SPACE_ID}
+
+# ── Diary Attachments ─────────────────────────────
+MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100 MB
+ALLOWED_ATTACHMENT_TYPES = {
+    # images
+    "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/bmp", "image/tiff",
+    # video
+    "video/mp4", "video/webm", "video/quicktime", "video/x-msvideo",
+    # documents
+    "application/pdf",
+    # text / code
+    "text/markdown", "text/plain", "text/x-markdown", "text/csv",
+    "application/json", "text/javascript", "application/javascript",
+    "text/html", "text/css", "text/xml", "application/xml",
+    "text/x-python", "text/x-ruby", "text/x-c", "text/x-c++", "text/x-java",
+    "application/x-shellscript", "text/x-shellscript", "application/sql", "text/yaml", "text/x-yaml",
+    "text/x-toml", "text/x-log",
+}
+ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff",
+    ".mp4", ".webm", ".mov", ".avi",
+    ".pdf", ".md", ".txt", ".json", ".csv",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".rb", ".go", ".rs", ".java",
+    ".c", ".cpp", ".h", ".css", ".html", ".xml", ".yaml", ".yml", ".toml",
+    ".sh", ".sql", ".log",
+}
+
+def _diary_attach_dir(username: str) -> Path:
+    d = user_dir(username) / "diary-attachments"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+@app.post("/api/diary/upload")
+async def diary_upload(request: Request, file: UploadFile = File(...)):
+    """Upload a file attachment for diary entries. Max 100MB."""
+    uname = getattr(request.state, "username", None)
+    if not uname:
+        raise HTTPException(401, "not authenticated")
+
+    # Validate extension
+    ext = Path(file.filename or "unknown").suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"file type not allowed: {ext}")
+
+    # Validate content type
+    ct = file.content_type or "application/octet-stream"
+    # Some browsers send wrong types; fall back to extension check
+    if ct not in ALLOWED_ATTACHMENT_TYPES and ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"content type not allowed: {ct}")
+
+    # Read + size check
+    content = await file.read()
+    if len(content) > MAX_ATTACHMENT_SIZE:
+        raise HTTPException(413, f"file too large (max {MAX_ATTACHMENT_SIZE // (1024*1024)} MB)")
+
+    # Unique filename: timestamp + original extension
+    safe_name = f"{int(time.time()*1000)}_{secrets.token_hex(4)}{ext}"
+    attach_dir = _diary_attach_dir(uname)
+    dest = attach_dir / safe_name
+    dest.write_bytes(content)
+
+    log.info("diary attachment uploaded: %s by %s (%d bytes)", safe_name, uname, len(content))
+    return {
+        "ok": True,
+        "fileId": safe_name,
+        "originalName": file.filename,
+        "size": len(content),
+        "type": ct,
+        "url": f"/api/diary/attachment/{safe_name}",
+    }
+
+@app.get("/api/diary/attachment/{filename}")
+async def diary_serve(filename: str, request: Request):
+    """Serve a diary attachment file."""
+    uname = getattr(request.state, "username", None)
+    if not uname:
+        raise HTTPException(401, "not authenticated")
+
+    attach_dir = _diary_attach_dir(uname)
+    # Sanitize: prevent path traversal
+    safe = Path(filename).name
+    if safe != filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+
+    fp = attach_dir / safe
+    if not fp.exists():
+        raise HTTPException(404, "file not found")
+
+    # Determine media type from extension
+    ext = fp.suffix.lower()
+    media_map = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        ".bmp": "image/bmp", ".tiff": "image/tiff",
+        ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo",
+        ".pdf": "application/pdf",
+        ".md": "text/markdown", ".txt": "text/plain", ".csv": "text/csv",
+        ".json": "application/json", ".js": "text/javascript", ".ts": "text/javascript",
+        ".jsx": "text/javascript", ".tsx": "text/javascript",
+        ".py": "text/x-python", ".rb": "text/x-ruby",
+        ".go": "text/x-go", ".rs": "text/x-rust", ".java": "text/x-java",
+        ".c": "text/x-c", ".cpp": "text/x-c++", ".h": "text/x-c",
+        ".css": "text/css", ".html": "text/html", ".xml": "application/xml",
+        ".yaml": "text/yaml", ".yml": "text/yaml", ".toml": "text/plain",
+        ".sh": "application/x-shellscript", ".sql": "application/sql",
+        ".log": "text/plain",
+    }
+    media_type = media_map.get(ext, "application/octet-stream")
+    return FileResponse(fp, media_type=media_type)
+
+@app.delete("/api/diary/attachment/{filename}")
+async def diary_delete_attachment(filename: str, request: Request):
+    """Delete a diary attachment file."""
+    uname = getattr(request.state, "username", None)
+    if not uname:
+        raise HTTPException(401, "not authenticated")
+
+    safe = Path(filename).name
+    if safe != filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+
+    fp = _diary_attach_dir(uname) / safe
+    if fp.exists():
+        fp.unlink()
+        log.info("diary attachment deleted: %s by %s", safe, uname)
+    return {"ok": True}
 
 # ── Static files ──────────────────────────────────
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

@@ -20,11 +20,12 @@
   let _lastDeletedTodo = null;
 
   /* ── CRUD ─────────────────────────────────────────────── */
-  function addTodo(text, zoneIdx, cycle) {
+  function addTodo(text, zoneIdx, cycle, priority) {
     if (!text || !text.trim()) return;
     todos().push({
       id: uid(), text: text.trim(),
       zoneIdx: zoneIdx ?? -1, cycle: cycle ?? -1,
+      priority: priority ?? 2,
       done: false, created: todayKey()
     });
     saveTodos();
@@ -83,6 +84,23 @@
           <input type="text" id="tlAddText" placeholder="What needs to be done?" autofocus
             style="width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:10px 14px;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"
             onkeydown="if(event.key==='Enter')ZoneApp._tlSubmitAdd()" />
+          <div>
+            <span class="field-label">Priority</span>
+            <div class="tl-priority-selector" id="tlAddPriority">
+              <div class="tl-priority-opt" data-val="0" onclick="ZoneApp._tlSelectPriority('tlAddPriority', 0)">
+                <span class="tl-priority p0" style="width:18px;height:18px;font-size:8px">P1</span> Urgent
+              </div>
+              <div class="tl-priority-opt" data-val="1" onclick="ZoneApp._tlSelectPriority('tlAddPriority', 1)">
+                <span class="tl-priority p1" style="width:18px;height:18px;font-size:8px">P2</span> High
+              </div>
+              <div class="tl-priority-opt selected" data-val="2" onclick="ZoneApp._tlSelectPriority('tlAddPriority', 2)">
+                <span class="tl-priority p2" style="width:18px;height:18px;font-size:8px">P3</span> Normal
+              </div>
+              <div class="tl-priority-opt" data-val="3" onclick="ZoneApp._tlSelectPriority('tlAddPriority', 3)">
+                <span class="tl-priority p3" style="width:18px;height:18px;font-size:8px">P4</span> Low
+              </div>
+            </div>
+          </div>
           <div style="display:flex;gap:10px">
             <div style="flex:1">
               <span class="field-label">Zone</span>
@@ -220,6 +238,8 @@
     let filtered = dayTodos;
     if (filterDone === 1) filtered = filtered.filter(t => !t.done);
     if (filterDone === 2) filtered = filtered.filter(t => t.done);
+    // Sort by priority (lower number = higher priority), then by created time
+    filtered.sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
 
     const doneCount = dayTodos.filter(t => t.done).length;
     const pendingCount = dayTodos.length - doneCount;
@@ -268,7 +288,10 @@
     if (z) meta.push(`<span class="tl-badge" style="--badge-c:${z.color || 'var(--text-muted)'}">Z${String(z.id ?? t.zoneIdx + 1).padStart(2,'0')}</span>`);
     if (t.cycle >= 0) meta.push(`<span class="tl-badge tl-badge-cycle">C${t.cycle + 1}</span>`);
 
+    const prioLabels = ['P1','P2','P3','P4'];
+    const prioClass = t.priority !== undefined ? 'p' + t.priority : 'p2';
     return `<div class="tl-item ${t.done ? 'done' : ''}" data-id="${t.id}">
+      <span class="tl-priority ${prioClass}" onclick="event.stopPropagation();ZoneApp._tlCyclePriority('${t.id}')" title="Priority ${t.priority !== undefined ? t.priority + 1 : 3} — click to cycle">${t.priority !== undefined ? prioLabels[t.priority] || 'P3' : 'P3'}</span>
       <button class="tl-check" onclick="ZoneApp._tlToggle('${t.id}')" title="${t.done ? 'Mark pending' : 'Mark done'}">
         ${t.done ? '<span class="tl-check-icon">✓</span>' : ''}
       </button>
@@ -399,8 +422,10 @@
     const text = document.getElementById('tlAddText')?.value;
     const zoneIdx = Number(document.getElementById('tlAddZone')?.value ?? -1);
     const cycle = Number(document.getElementById('tlAddCycle')?.value ?? -1);
+    const prioEl = document.querySelector('#tlAddPriority .tl-priority-opt.selected');
+    const priority = prioEl ? Number(prioEl.dataset.val) : 2;
     if (!text || !text.trim()) return;
-    addTodo(text, zoneIdx, cycle);
+    addTodo(text, zoneIdx, cycle, priority);
     ZoneApp._tlCloseAddModal();
   };
 
@@ -432,6 +457,22 @@
   ZoneApp._tlCloseEditModal = function () { const m = document.getElementById('tlEditModal'); if (m) m.remove(); };
   ZoneApp._tlCloseDelModal = function () { const m = document.getElementById('tlDelModal'); if (m) m.remove(); };
   ZoneApp._tlCloseCompleteModal = function () { const m = document.getElementById('tlCompleteModal'); if (m) m.remove(); };
+  ZoneApp._tlSelectPriority = function(containerId, val) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.querySelectorAll('.tl-priority-opt').forEach(o => {
+      o.classList.toggle('selected', Number(o.dataset.val) === val);
+    });
+  };
+
+  ZoneApp._tlCyclePriority = function(id) {
+    const t = todos().find(x => x.id === id);
+    if (!t) return;
+    t.priority = t.priority !== undefined ? (t.priority + 1) % 4 : 0;
+    saveTodos();
+    renderTodoTab();
+  };
+
   ZoneApp._tlFilterDone = function (v) { filterDone = v; renderTodoTab(); };
 
   ZoneApp._tlClearDone = function () {
