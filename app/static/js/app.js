@@ -1246,6 +1246,7 @@ const ZoneApp = (() => {
 
   function switchTab(tab) {
     state.tab = tab;
+    try { storage().set('activeTab', tab); } catch {}
     if (state._examTimerInterval) { clearInterval(state._examTimerInterval); state._examTimerInterval = null; }
     render();
     if (tab === 'exam-timer') {
@@ -3577,7 +3578,15 @@ const ZoneApp = (() => {
     if (v && v.trim() && v.trim() !== current) {
       state.config.identity.goalName = v.trim();
       saveConfig();
-      render();
+    // Restore last active tab from localStorage
+    try {
+      const savedTab = storage().get('activeTab');
+      if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','settings'].includes(savedTab)) {
+        state.tab = savedTab;
+      }
+    } catch {}
+
+    render();
     }
   }
 
@@ -4318,7 +4327,7 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4342,7 +4351,7 @@ const ZoneApp = (() => {
     if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
