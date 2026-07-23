@@ -63,6 +63,10 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 .sync-mode-select.active{display:flex}
 .sync-input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--text);font-size:12px;font-family:var(--mono);margin-top:8px;outline:none}
 .sync-input:focus{border-color:var(--accent-lecture)}
+.pw-wrap{position:relative;display:inline-block;width:100%}
+.pw-wrap input{width:100%;padding-right:36px}
+.pw-eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-muted);font-size:14px;line-height:1;user-select:none;padding:4px;z-index:1}
+.pw-eye:hover{color:var(--text)}
 </style>
 </head>
 <body>
@@ -76,7 +80,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 <p class="sub">Server restarted — admin only can sync data from GitHub</p>
 
 <div style="margin-top:16px">
-  <input type="password" id="syncAdminPw" class="sync-input" placeholder="Admin password" autocomplete="current-password" style="margin-bottom:12px">
+  <div class="pw-wrap"><input type="password" id="syncAdminPw" class="sync-input" placeholder="Admin password" autocomplete="current-password" style="margin-bottom:12px;padding-right:36px"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
 </div>
 
 <div style="margin-top:8px">
@@ -126,7 +130,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 <div class="field">
 <label>PASSWORD</label>
-<input type="password" id="loginPass" autocomplete="current-password" placeholder="Your password">
+<div class="pw-wrap"><input type="password" id="loginPass" autocomplete="current-password" placeholder="Your password"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
 </div>
 <button class="btn btn-primary" id="loginBtn">UNLOCK</button>
 <div class="error" id="loginError"></div>
@@ -140,11 +144,11 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 <div class="field">
 <label>ADMIN PASSWORD</label>
-<input type="password" id="resetAdminPass" placeholder="Admin password">
+<div class="pw-wrap"><input type="password" id="resetAdminPass" placeholder="Admin password"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
 </div>
 <div class="field">
 <label>NEW PASSWORD</label>
-<input type="password" id="resetNewPass" placeholder="Min 8 characters">
+<div class="pw-wrap"><input type="password" id="resetNewPass" placeholder="Min 8 characters"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
 </div>
 <button class="btn btn-primary" id="resetBtn" style="font-size:10px;padding:10px">RESET PASSWORD</button>
 <div class="error" id="resetError"></div>
@@ -160,7 +164,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 <div class="field">
 <label>CHOOSE PASSWORD</label>
-<input type="password" id="signupPass" autocomplete="new-password" placeholder="Min 8 characters">
+<div class="pw-wrap"><input type="password" id="signupPass" autocomplete="new-password" placeholder="Min 8 characters"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
 </div>
 <button class="btn btn-suc" id="signupBtn">CREATE ACCOUNT</button>
 <div class="error" id="signupError"></div>
@@ -177,6 +181,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 </div>
 <script>
+function togglePwEye(btn){const inp=btn.previousElementSibling;if(!inp)return;const isPw=inp.type==='password';inp.type=isPw?'text':'password';btn.textContent=isPw?'🙈':'👁';}
 function showPanel(name){
   document.getElementById('panelLogin').className='panel'+(name==='login'?'':' hide');
   document.getElementById('panelSignup').className='panel'+(name==='signup'?'':' hide');
@@ -271,14 +276,14 @@ function dismissSync(){
   document.getElementById('loginBox').style.display='';
 }
 
-function _getSyncPw(){
+function _getSyncPw(targetStatusId){
   const pw=(document.getElementById('syncAdminPw').value||'').trim();
-  if(!pw){const st=document.getElementById('pullStatus');st.className='sync-status err';st.textContent='❌ Enter admin password first';return null;}
+  if(!pw){const st=document.getElementById(targetStatusId||'pullStatus');st.className='sync-status err';st.textContent='❌ Enter admin password first';return null;}
   return pw;
 }
 
 function doSyncPull(mode){
-  const pw=_getSyncPw(); if(!pw) return;
+  const pw=_getSyncPw('pullStatus'); if(!pw) return;
   const st=document.getElementById('pullStatus');
   st.className='sync-status';st.textContent='Pulling ('+mode+')...';
   fetch('/api/sync-screen/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,admin_password:pw})})
@@ -289,7 +294,7 @@ function doSyncPull(mode){
 }
 
 function doSyncPush(mode){
-  const pw=_getSyncPw(); if(!pw) return;
+  const pw=_getSyncPw('pushStatus'); if(!pw) return;
   const st=document.getElementById('pushStatus');
   st.className='sync-status';st.textContent='Pushing ('+mode+')...';
   fetch('/api/sync-screen/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,admin_password:pw})})

@@ -434,16 +434,6 @@
   ZoneApp._tlCloseCompleteModal = function () { const m = document.getElementById('tlCompleteModal'); if (m) m.remove(); };
   ZoneApp._tlFilterDone = function (v) { filterDone = v; renderTodoTab(); };
 
-  ZoneApp._tlQuickAdd = function () {
-    const input = document.getElementById('tlQuickInput');
-    if (!input) return;
-    const text = input.value.trim();
-    if (!text) return;
-    addTodo(text, -1, -1);
-    input.value = '';
-    input.focus();
-  };
-
   ZoneApp._tlClearDone = function () {
     const done = todos().filter(t => t.done);
     if (done.length === 0) return;

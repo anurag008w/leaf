@@ -579,7 +579,7 @@ const ZoneApp = (() => {
       }
       if (e.type === 'skip_block' || e.type === 'skip_zone') {
         dailyMap[date].skips++;
-        // Count partial focus time from skipped blocks (duration field added in timerSkip)
+        // Count partial focus time from skipped blocks
         if (e.type === 'skip_block' && e.duration > 0) {
           dailyMap[date].focusMin += e.duration;
         }
@@ -817,63 +817,12 @@ const ZoneApp = (() => {
     zs.blockComplete = false;
     zs.overtimeSeconds = 0;
     zs.elapsed = 0;
-    zs.zoneElapsed = 0;
+    // Don't zero zoneElapsed — preserve time-limit tracking for zone auto-complete
     const dur = zs.blockType === 'focus' ? (z.focusDuration || 25) * 60 : (getBreakDur(z, zs.cycle) * 60);
     zs.remaining = dur;
     zs.total = dur;
     renderAll();
     toast('Timer reset', 'info');
-  }
-
-  function timerSkip() {
-    const z = getZone(state.currentZoneIdx);
-    const zs = getCurrentZs();
-    if (!z || !zs) return;
-    stopTimer();
-    zs.running = false;
-
-    // Log overtime before discarding if skipping during overtime
-    if (zs.blockComplete && zs.overtimeSeconds > 0) {
-      logEvent('overtime', { zoneIdx: state.currentZoneIdx, seconds: zs.overtimeSeconds, cycle: zs.cycle });
-      const extraMin = Math.round(zs.overtimeSeconds / 60);
-      if (extraMin > 0) {
-        state.stats.totalFocusMin += extraMin;
-        const key = todayKey();
-        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
-        state.stats.history[key].focusMin += extraMin;
-      }
-    }
-
-    if (zs.blockType === 'focus' && !zs.blockComplete) {
-      const partial = Math.round(((z.focusDuration || 25) * 60 - zs.remaining) / 60);
-      if (partial >= 1) {
-        state.stats.totalFocusMin += partial;
-        const key = todayKey();
-        if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
-        state.stats.history[key].focusMin += partial;
-      }
-      logEvent('skip_block', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle, remaining: zs.remaining, duration: partial > 0 ? partial : 0 });
-    }
-    zs.remaining = 0;
-    zs.elapsed = 0;
-    zs.blockComplete = false;
-    zs.overtimeSeconds = 0;
-    if (zs.blockType === 'focus') {
-      zs.blockType = 'break';
-      const bdur = getBreakDur(z, zs.cycle) * 60;
-      zs.remaining = bdur; zs.total = bdur;
-      chime('breakstart');
-      renderAll();
-    } else {
-      chime('transition');
-      zs.cycle++;
-      zs.blockType = 'focus';
-      const maxCycles = z.totalCycles || 4;
-      if (zs.cycle >= maxCycles) { completeZone(); return; }
-      zs.remaining = (z.focusDuration || 25) * 60;
-      zs.total = (z.focusDuration || 25) * 60;
-      renderAll();
-    }
   }
 
   /* ── Session Done — complete current focus, advance cycle (not zone) ── */
@@ -884,16 +833,25 @@ const ZoneApp = (() => {
     if (!z || !zs) return;
 
     const dur = z.focusDuration || 25;
-    logEvent('session_complete', { zoneIdx: state.currentZoneIdx, duration: dur, cycle: zs.cycle, skipped: false });
-    chime('complete');
-    toast(`Session ${zs.cycle + 1} done!`, 'success');
-    state.stats.totalSessions++;
-    state.stats.totalFocusMin += dur;
-    const key = todayKey();
-    if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
-    state.stats.history[key].focusMin += dur;
-    state.stats.history[key].sessions++;
-    saveState();
+
+    // Guard: if blockComplete is already true, handleBlockComplete already logged stats
+    // — skip double-counting
+    const alreadyCounted = zs.blockComplete;
+    if (!alreadyCounted) {
+      logEvent('session_complete', { zoneIdx: state.currentZoneIdx, duration: dur, cycle: zs.cycle, skipped: false });
+      chime('complete');
+      toast(`Session ${zs.cycle + 1} done!`, 'success');
+      state.stats.totalSessions++;
+      state.stats.totalFocusMin += dur;
+      const key = todayKey();
+      if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+      state.stats.history[key].focusMin += dur;
+      state.stats.history[key].sessions++;
+      saveState();
+    } else {
+      chime('complete');
+      toast(`Session ${zs.cycle + 1} done!`, 'success');
+    }
 
     // Advance cycle
     stopTimer();
@@ -3328,8 +3286,9 @@ const ZoneApp = (() => {
               <div class="stg-row">
                 <div><div class="stg-row-label">Password</div></div>
                 <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                  <input class="stg-input" type="password" id="currentPwInput" placeholder="Current" style="width:120px">
-                  <input class="stg-input" type="password" id="newPwInput" placeholder="New" style="width:120px">
+                  <div class="pw-wrap" style="width:110px"><input class="stg-input" type="password" id="currentPwInput" placeholder="Current" style="width:100%"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
+                  <div class="pw-wrap" style="width:110px"><input class="stg-input" type="password" id="newPwInput" placeholder="New" style="width:100%"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
+                  <div class="pw-wrap" style="width:110px"><input class="stg-input" type="password" id="confirmPwInput" placeholder="Confirm" style="width:100%"><span class="pw-eye" onclick="togglePwEye(this)">👁</span></div>
                   <button class="ctl primary" onclick="ZoneApp.changePassword()" style="padding:6px 14px;font-size:11px">Change</button>
                 </div>
               </div>
@@ -3663,7 +3622,7 @@ const ZoneApp = (() => {
     if (_themeFxRaf) { cancelAnimationFrame(_themeFxRaf); _themeFxRaf = null; }
     _themeFxParticles = [];
     const theme = state.settings.theme || 'hacker';
-    if (theme === 'hacker' || theme === 'cyber' || theme === 'midnight' || theme === 'amber') {
+    if (theme === 'hacker' || theme === 'cyber' || theme === 'midnight' || theme === 'amber' || theme === 'corporate' || theme === 'platinum') {
       if (!_themeFxCanvas) {
         _themeFxCanvas = document.createElement('canvas');
         _themeFxCanvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.7';
@@ -3892,13 +3851,89 @@ const ZoneApp = (() => {
       };
     }
 
+    if (theme === 'corporate') {
+      const lines = [];
+      return {
+        init() {
+          const n = Math.min(30, Math.floor(w() / 50));
+          for (let i = 0; i < n; i++) {
+            lines.push({
+              x1: Math.random() * w(), y1: Math.random() * h(),
+              len: 40 + Math.random() * 120,
+              angle: -0.3 + Math.random() * 0.6,
+              opacity: 0.03 + Math.random() * 0.06,
+              speed: 0.1 + Math.random() * 0.3,
+            });
+          }
+        },
+        update() {
+          for (const l of lines) {
+            l.x1 += l.speed;
+            if (l.x1 > w() + l.len) l.x1 = -l.len;
+          }
+        },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          for (const l of lines) {
+            const x2 = l.x1 + Math.cos(l.angle) * l.len;
+            const y2 = l.y1 + Math.sin(l.angle) * l.len;
+            c.beginPath();
+            c.moveTo(l.x1, l.y1);
+            c.lineTo(x2, y2);
+            c.strokeStyle = `rgba(37,99,235,${l.opacity})`;
+            c.lineWidth = 1;
+            c.stroke();
+          }
+        }
+      };
+    }
+
+    if (theme === 'platinum') {
+      const sparkles = [];
+      return {
+        init() {
+          const n = Math.min(40, Math.floor(w() / 30));
+          for (let i = 0; i < n; i++) {
+            sparkles.push({
+              x: Math.random() * w(), y: Math.random() * h(),
+              r: 0.5 + Math.random() * 1.5,
+              phase: Math.random() * Math.PI * 2,
+              speed: 0.5 + Math.random() * 1.5,
+              gold: Math.random() < 0.5,
+            });
+          }
+        },
+        update() { /* twinkle via sin in draw */ },
+        draw() {
+          c.clearRect(0, 0, w(), h());
+          const t = Date.now() / 1000;
+          for (const s of sparkles) {
+            const alpha = 0.15 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+            if (alpha < 0.1) continue;
+            c.beginPath();
+            c.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            c.fillStyle = s.gold ? `rgba(251,191,36,${alpha * 0.5})` : `rgba(209,213,219,${alpha * 0.5})`;
+            c.fill();
+            if (s.r > 1) {
+              c.beginPath();
+              c.arc(s.x, s.y, s.r * 3, 0, Math.PI * 2);
+              c.fillStyle = s.gold ? `rgba(251,191,36,${alpha * 0.06})` : `rgba(209,213,219,${alpha * 0.06})`;
+              c.fill();
+            }
+          }
+        }
+      };
+    }
+
     return null;
   }
 
   async function changePassword() {
     const cur = document.getElementById('currentPwInput')?.value;
     const pw = document.getElementById('newPwInput')?.value;
-    if (!cur || !pw) { toast('Fill in both fields', 'warning'); return; }
+    const confirm = document.getElementById('confirmPwInput')?.value;
+    if (!cur || !pw) { toast('Fill in all fields', 'warning'); return; }
+    if (pw !== confirm) { toast('New passwords do not match', 'warning'); return; }
     if (pw.length < 8) { toast('New password too short (min 8)', 'warning'); return; }
     if (new TextEncoder().encode(pw).length > 72) { toast('Password too long (max 72 bytes — try shorter)', 'warning'); return; }
     try {
@@ -3909,6 +3944,7 @@ const ZoneApp = (() => {
       toast('Password updated!', 'success');
       document.getElementById('currentPwInput').value = '';
       document.getElementById('newPwInput').value = '';
+      document.getElementById('confirmPwInput').value = '';
     } catch (e) {
       toast(e.message || 'Failed to change password', 'error');
     }
@@ -4888,7 +4924,7 @@ const ZoneApp = (() => {
   return {
     init, render, renderTabBody,
     switchTab, selectZone, jumpToCycle,
-    timerToggle, timerStart, timerPause, timerSkip, timerReset,
+    timerToggle, timerStart, timerPause, timerReset,
     sessionDone, zoneSkip,
     markZoneComplete, resetZone, resetDay,
     continueDay, continueSkippedZone, showContinueOptions,
@@ -4919,3 +4955,12 @@ const ZoneApp = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', () => ZoneApp.init());
+
+/* ─── Password eye toggle (global) ─── */
+function togglePwEye(btn) {
+  const inp = btn.previousElementSibling;
+  if (!inp) return;
+  const isPw = inp.type === 'password';
+  inp.type = isPw ? 'text' : 'password';
+  btn.textContent = isPw ? '🙈' : '👁';
+}

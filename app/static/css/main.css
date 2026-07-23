@@ -1426,14 +1426,6 @@ footer {
 .dp-legend-dot.left { background: var(--bg-3); border: 1.5px solid var(--line); }
 .dp-legend-dot.no-task { background: var(--bg-2); border: 1.5px dashed var(--line); opacity: 0.5; }
 
-/* Todo quick-add input */
-.tl-quick-add { display: flex; gap: 8px; margin-bottom: 12px; }
-.tl-quick-add input { flex: 1; padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text-primary); font-size: 0.82rem; font-family: inherit; outline: none; transition: border 0.2s; }
-.tl-quick-add input:focus { border-color: var(--accent-suc); }
-.tl-quick-add input::placeholder { color: var(--text-muted); }
-.tl-quick-add button { padding: 8px 14px; background: var(--accent-suc); color: var(--bg-1); border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-.tl-quick-add button:hover { opacity: 0.85; }
-
 /* Todo clear-done button */
 .tl-clear-done { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; margin-bottom: 10px; background: transparent; border: 1px solid var(--line); border-radius: 6px; color: var(--text-muted); font-size: 0.7rem; cursor: pointer; transition: all 0.2s; }
 .tl-clear-done:hover { background: var(--bg-2); color: var(--danger); border-color: var(--danger); }
@@ -2052,3 +2044,9 @@ footer {
   .stg-nav-btn.active { border-left: none; border-bottom: 3px solid var(--accent-solve); padding-left: 12px; }
   .za-grid { grid-template-columns: 1fr; }
 }
+
+/* ─── PASSWORD EYE TOGGLE ─── */
+.pw-wrap { position: relative; display: inline-block; width: 100%; }
+.pw-wrap input { width: 100%; padding-right: 36px; }
+.pw-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; user-select: none; padding: 4px; z-index: 1; }
+.pw-eye:hover { color: var(--text-primary); }
