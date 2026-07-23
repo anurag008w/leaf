@@ -3304,7 +3304,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Appearance -->
-          <div class="stg-section" id="stg-appearance">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'appearance' ? 'active' : ''}" id="stg-appearance">
             <div class="stg-card">
               <div class="stg-card-title">🎨 Theme</div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
@@ -3339,7 +3339,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Focus & Timer -->
-          <div class="stg-section" id="stg-timer">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'timer' ? 'active' : ''}" id="stg-timer">
             <div class="stg-card">
               <div class="stg-card-title">⏱ Timer Preset</div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
@@ -3372,7 +3372,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Notifications -->
-          <div class="stg-section" id="stg-notifications">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'notifications' ? 'active' : ''}" id="stg-notifications">
             <div class="stg-card">
               <div class="stg-card-title">🔔 Notifications & Sound</div>
               <div class="stg-row">
@@ -3397,7 +3397,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Calendar -->
-          <div class="stg-section" id="stg-calendar">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'calendar' ? 'active' : ''}" id="stg-calendar">
             <div class="stg-card">
               <div class="stg-card-title">📅 Calendar</div>
               <div class="stg-row">
@@ -3408,7 +3408,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Study Schedule -->
-          <div class="stg-section" id="stg-schedule">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'schedule' ? 'active' : ''}" id="stg-schedule">
             <div class="stg-card" style="grid-column:1/-1">
               <div class="stg-card-title">📚 Study Schedule</div>
               <!-- Timeline preview -->
@@ -3424,12 +3424,12 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Backup & Sync -->
-          <div class="stg-section" id="stg-backup">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'backup' ? 'active' : ''}" id="stg-backup">
             <div id="ghSyncCardSlot"></div>
           </div>
 
           <!-- Data -->
-          <div class="stg-section" id="stg-data">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'data' ? 'active' : ''}" id="stg-data">
             <div class="stg-card">
               <div class="stg-card-title">📦 Data Management</div>
               <div style="display:flex;flex-wrap:wrap;gap:10px">
@@ -3442,7 +3442,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Danger Zone -->
-          <div class="stg-section" id="stg-danger">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'danger' ? 'active' : ''}" id="stg-danger">
             <div class="stg-card stg-danger">
               <div class="stg-card-title">⚠️ Danger Zone</div>
               <div class="stg-row">
@@ -3453,7 +3453,7 @@ const ZoneApp = (() => {
           </div>
 
           <!-- Admin -->
-          ${state.isAdmin ? `<div class="stg-section" id="stg-admin">
+          ${state.isAdmin ? `<div class="stg-section ${(state.activeStgSection || 'account') === 'admin' ? 'active' : ''}" id="stg-admin">
             <div class="stg-card">
               <div class="stg-card-title">🔑 Reset Keys for Users</div>
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Generate a key for users to reset their password. Keys persist across restarts.</div>
