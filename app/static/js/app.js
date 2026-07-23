@@ -272,6 +272,7 @@ const ZoneApp = (() => {
       session, stats: state.stats, tracking: state.tracking,
       events: state.events, settings: state.settings,
       examTrack: state.examTrack, examDates: state.examDates,
+      todos: state.todos, examStartDate: state.examStartDate,
       onboarded: state.onboarded
     };
     Object.entries(beaconData).forEach(([k, v]) => {
@@ -2857,22 +2858,27 @@ const ZoneApp = (() => {
   function setCountdownMode(mode) {
     state.examCountdownMode = mode;
     try { localStorage.setItem('zg:examCountdownMode', mode); } catch {}
-    renderExamTimerTab();
+    // Update button active states without full re-render to preserve settings position
+    document.querySelectorAll('.exam-cd-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.textContent.trim() === {full:'DD:HH:MM:SS',days:'Days',hours:'Hours',mins:'Mins',secs:'Secs'}[mode]);
+    });
+    // Also update the exam timer tab if visible
+    if (!document.querySelector('.stg-sidebar')) renderExamTimerTab();
   }
 
   function renderExamTimerTab() {
     const body = document.getElementById('tabBody');
     const exams = getExamDates();
     const now = Date.now();
-    const mode = state.examCountdownMode || 'full';
 
-    // Restore mode from localStorage
+    // Restore mode from localStorage FIRST (before using it)
     try {
       const saved = localStorage.getItem('zg:examCountdownMode') || localStorage.getItem('zu:examCountdownMode');
       if (saved && ['full','days','hours','mins','secs'].includes(saved)) {
         state.examCountdownMode = saved;
       }
     } catch {}
+    const mode = state.examCountdownMode || 'full';
 
     const modes = [
       { key: 'full', label: 'DD:HH:MM:SS' },
@@ -4251,6 +4257,7 @@ const ZoneApp = (() => {
     state.config = { identity: {}, zones: [] };
     state.settings = { notifEnabled: true, soundEnabled: true, quietMode: false, showDefaultEvents: true, theme: 'hacker', autoStartBreaks: true, flowMode: false, timerPreset: 'custom', soundPack: 'default' };
     state.examTrack = null;
+    state.examStartDate = null;
     state.onboarded = false;
     state.byZone = {};
     state.dayComplete = false;
@@ -4268,11 +4275,12 @@ const ZoneApp = (() => {
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'session', value: { currentZoneIdx: 0, byZone: {}, dayComplete: false } }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examTrack', value: null }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examDates', value: [] }) }),
+        fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'examStartDate', value: null }) }),
         fetch('/api/user-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: 'onboarded', value: false }) }),
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4296,7 +4304,7 @@ const ZoneApp = (() => {
     if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
