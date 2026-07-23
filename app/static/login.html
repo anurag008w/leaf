@@ -71,11 +71,15 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 <!-- SYNC SCREEN (pre-login, server restart only) -->
 <div class="sync-screen" id="syncScreen">
 <div class="login-box">
-<span class="logo" aria-hidden="true">🔄</span>
-<h1>DATA SYNC</h1>
-<p class="sub">Server restarted — pull your data from GitHub before login</p>
+<span class="logo" aria-hidden="true">🔒</span>
+<h1>ADMIN SYNC</h1>
+<p class="sub">Server restarted — admin only can sync data from GitHub</p>
 
-<div style="margin-top:20px">
+<div style="margin-top:16px">
+  <input type="password" id="syncAdminPw" class="sync-input" placeholder="Admin password" autocomplete="current-password" style="margin-bottom:12px">
+</div>
+
+<div style="margin-top:8px">
 <div class="sync-card" id="syncCard">
   <div class="title">⬇️ Pull from GitHub</div>
   <div class="desc">Fetch your data from <b id="syncRepoName">zone-data-backup</b> and restore locally.</div>
@@ -100,7 +104,7 @@ h1{font-size:20px;font-weight:700;letter-spacing:2px;margin-bottom:2px}
 </div>
 
 <button class="btn btn-ghost" onclick="dismissSync()" style="margin-top:8px">SKIP → Login</button>
-<div class="hint" style="margin-top:12px">Sync data first, then login normally</div>
+<div class="hint" style="margin-top:12px">Enter admin password to sync, or skip to login</div>
 </div>
 </div>
 <!-- END SYNC SCREEN -->
@@ -267,23 +271,31 @@ function dismissSync(){
   document.getElementById('loginBox').style.display='';
 }
 
+function _getSyncPw(){
+  const pw=(document.getElementById('syncAdminPw').value||'').trim();
+  if(!pw){const st=document.getElementById('pullStatus');st.className='sync-status err';st.textContent='❌ Enter admin password first';return null;}
+  return pw;
+}
+
 function doSyncPull(mode){
+  const pw=_getSyncPw(); if(!pw) return;
   const st=document.getElementById('pullStatus');
   st.className='sync-status';st.textContent='Pulling ('+mode+')...';
-  fetch('/api/sync-screen/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})})
+  fetch('/api/sync-screen/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,admin_password:pw})})
   .then(r=>r.json()).then(d=>{
     if(d.success){st.className='sync-status ok';st.textContent='✅ '+d.message+' — Reloading...';setTimeout(()=>location.reload(),1500)}
-    else{st.className='sync-status err';st.textContent='❌ '+d.message}
+    else{st.className='sync-status err';st.textContent='❌ '+(d.message||d.detail||'Failed')}
   }).catch(e=>{st.className='sync-status err';st.textContent='❌ '+e.message});
 }
 
 function doSyncPush(mode){
+  const pw=_getSyncPw(); if(!pw) return;
   const st=document.getElementById('pushStatus');
   st.className='sync-status';st.textContent='Pushing ('+mode+')...';
-  fetch('/api/sync-screen/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})})
+  fetch('/api/sync-screen/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,admin_password:pw})})
   .then(r=>r.json()).then(d=>{
     if(d.success){st.className='sync-status ok';st.textContent='✅ '+d.message}
-    else{st.className='sync-status err';st.textContent='❌ '+d.message}
+    else{st.className='sync-status err';st.textContent='❌ '+(d.message||d.detail||'Failed')}
   }).catch(e=>{st.className='sync-status err';st.textContent='❌ '+e.message});
 }
 </script>

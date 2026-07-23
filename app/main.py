@@ -1022,9 +1022,12 @@ async def sync_screen_status():
 
 @app.post("/api/sync-screen/push")
 async def sync_screen_push(request: Request):
-    """Push from sync screen (admin only, no auth required — data is empty)."""
+    """Push from sync screen (admin only — requires admin password)."""
     global _server_restarted
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    admin_pw = body.get("admin_password", "")
+    if not ZONE_PASSWORD or not secrets.compare_digest(admin_pw, ZONE_PASSWORD):
+        raise HTTPException(403, "admin password required")
     mode = body.get("mode", "normal")
     if mode not in ("normal", "force", "force-with-lease"):
         mode = "normal"
@@ -1038,9 +1041,12 @@ async def sync_screen_push(request: Request):
 
 @app.post("/api/sync-screen/pull")
 async def sync_screen_pull(request: Request):
-    """Pull from sync screen (admin only, no auth required — data is empty)."""
+    """Pull from sync screen (admin only — requires admin password)."""
     global _server_restarted
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    admin_pw = body.get("admin_password", "")
+    if not ZONE_PASSWORD or not secrets.compare_digest(admin_pw, ZONE_PASSWORD):
+        raise HTTPException(403, "admin password required")
     mode = body.get("mode", "normal")
     if mode not in ("normal", "force", "force-with-lease"):
         mode = "normal"

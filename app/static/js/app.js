@@ -3299,7 +3299,7 @@ const ZoneApp = (() => {
       { id: 'notifications', icon: '🔔', label: 'Notifications' },
       { id: 'calendar', icon: '📅', label: 'Calendar' },
       { id: 'schedule', icon: '📚', label: 'Study Schedule' },
-      { id: 'backup', icon: '☁️', label: 'Backup & Sync' },
+      { id: 'backup', icon: '☁️', label: 'Backup & Sync', show: state.isAdmin },
       { id: 'data', icon: '📦', label: 'Data' },
       { id: 'danger', icon: '⚠️', label: 'Danger Zone' },
     ];
@@ -3505,11 +3505,13 @@ const ZoneApp = (() => {
         </div>
       </div>`;
 
-    // Load GitHub sync status async
-    loadGitHubSyncStatus().then(() => {
-      const slot = document.getElementById('ghSyncCardSlot');
-      if (slot) slot.innerHTML = renderGitHubSyncCard();
-    });
+    // Load GitHub sync status async (admin only)
+    if (state.isAdmin) {
+      loadGitHubSyncStatus().then(() => {
+        const slot = document.getElementById('ghSyncCardSlot');
+        if (slot) slot.innerHTML = renderGitHubSyncCard();
+      });
+    }
     // Load existing reset keys for admin
     if (state.isAdmin) loadResetKeys();
   }
@@ -3520,8 +3522,8 @@ const ZoneApp = (() => {
     btn.classList.add('active');
     const el = document.getElementById('stg-' + id);
     if (el) el.classList.add('active');
-    // Load GitHub sync when navigating to backup
-    if (id === 'backup') {
+    // Load GitHub sync when navigating to backup (admin only)
+    if (id === 'backup' && state.isAdmin) {
       loadGitHubSyncStatus().then(() => {
         const slot = document.getElementById('ghSyncCardSlot');
         if (slot) slot.innerHTML = renderGitHubSyncCard();
