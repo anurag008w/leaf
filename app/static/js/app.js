@@ -3270,11 +3270,14 @@ const ZoneApp = (() => {
       <h2 style="font-size:20px;font-weight:700;margin-bottom:20px">⚙️ Settings</h2>
       <div class="stg-layout">
         <div class="stg-sidebar">
-          ${sections.filter(s => s.show !== false).map((s, i) => `<button class="stg-nav-btn ${i === 0 ? 'active' : ''}" onclick="ZoneApp._stgNav('${s.id}', this)"><span class="stg-nav-icon">${s.icon}</span>${s.label}</button>`).join('')}
+          ${sections.filter(s => s.show !== false).map((s, i) => {
+            const activeId = state.activeStgSection || sections[0].id;
+            return `<button class="stg-nav-btn ${s.id === activeId ? 'active' : ''}" onclick="ZoneApp._stgNav('${s.id}', this)"><span class="stg-nav-icon">${s.icon}</span>${s.label}</button>`;
+          }).join('')}
         </div>
         <div class="stg-content">
           <!-- Account -->
-          <div class="stg-section active" id="stg-account">
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'account' ? 'active' : ''}" id="stg-account">
             <div class="stg-card">
               <div class="stg-card-title">👤 Account</div>
               <div class="stg-row">
@@ -3477,6 +3480,8 @@ const ZoneApp = (() => {
   }
 
   function _stgNav(id, btn) {
+    state.activeStgSection = id;
+    try { storage().set('activeStgSection', id); } catch {}
     document.querySelectorAll('.stg-nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.stg-section').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');
@@ -4319,7 +4324,7 @@ const ZoneApp = (() => {
       ]);
     } catch {}
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4343,7 +4348,7 @@ const ZoneApp = (() => {
     if (_pendingHttpSave) { clearTimeout(_pendingHttpSave); _pendingHttpSave = null; }
     fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(()=>{});
     ['zu:', 'zg:', 'zone:'].forEach(p => {
-      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab'].forEach(k => {
+      ['onboarded','config','session','stats','tracking','events','settings','examTrack','examDates','todos','examStartDate','examCountdownMode','activeTab','activeStgSection'].forEach(k => {
         try { localStorage.removeItem(p + k); } catch {}
       });
     });
@@ -4898,6 +4903,8 @@ const ZoneApp = (() => {
       if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','settings'].includes(savedTab)) {
         state.tab = savedTab;
       }
+      const savedStgSection = storage().get('activeStgSection');
+      if (savedStgSection) state.activeStgSection = savedStgSection;
     } catch {}
 
     render();
