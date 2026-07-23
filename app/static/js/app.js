@@ -3578,15 +3578,7 @@ const ZoneApp = (() => {
     if (v && v.trim() && v.trim() !== current) {
       state.config.identity.goalName = v.trim();
       saveConfig();
-    // Restore last active tab from localStorage
-    try {
-      const savedTab = storage().get('activeTab');
-      if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','settings'].includes(savedTab)) {
-        state.tab = savedTab;
-      }
-    } catch {}
-
-    render();
+      render();
     }
   }
 
@@ -4899,6 +4891,14 @@ const ZoneApp = (() => {
         rebuildZoneStates();
       }
     }
+
+    // Restore last active tab from localStorage
+    try {
+      const savedTab = storage().get('activeTab');
+      if (savedTab && ['console','todo','wallpapers','calendar','stats','exam-timer','settings'].includes(savedTab)) {
+        state.tab = savedTab;
+      }
+    } catch {}
 
     render();
     window.addEventListener('beforeunload', e => {
