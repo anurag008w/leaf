@@ -454,9 +454,8 @@ app = FastAPI(title="Zone Study OS", version="1.0.0", lifespan=lifespan)
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://hf.space https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'none'; object-src 'none'"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://hf.space https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'self'; object-src 'none'"
     return resp
 
 # ── Auth middleware ───────────────────────────────
@@ -1128,13 +1127,21 @@ ALLOWED_ATTACHMENT_TYPES = {
     "video/mp4", "video/webm", "video/quicktime", "video/x-msvideo",
     # documents
     "application/pdf",
-    # text / markdown
-    "text/markdown", "text/plain", "text/x-markdown",
+    # text / code
+    "text/markdown", "text/plain", "text/x-markdown", "text/csv",
+    "application/json", "text/javascript", "application/javascript",
+    "text/html", "text/css", "text/xml", "application/xml",
+    "text/x-python", "text/x-ruby", "text/x-c", "text/x-c++", "text/x-java",
+    "application/x-shellscript", "text/x-shellscript", "application/sql", "text/yaml", "text/x-yaml",
+    "text/x-toml", "text/x-log",
 }
 ALLOWED_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff",
     ".mp4", ".webm", ".mov", ".avi",
-    ".pdf", ".md", ".txt",
+    ".pdf", ".md", ".txt", ".json", ".csv",
+    ".js", ".ts", ".jsx", ".tsx", ".py", ".rb", ".go", ".rs", ".java",
+    ".c", ".cpp", ".h", ".css", ".html", ".xml", ".yaml", ".yml", ".toml",
+    ".sh", ".sql", ".log",
 }
 
 def _diary_attach_dir(username: str) -> Path:
@@ -1207,7 +1214,16 @@ async def diary_serve(filename: str, request: Request):
         ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
         ".avi": "video/x-msvideo",
         ".pdf": "application/pdf",
-        ".md": "text/markdown", ".txt": "text/plain",
+        ".md": "text/markdown", ".txt": "text/plain", ".csv": "text/csv",
+        ".json": "application/json", ".js": "text/javascript", ".ts": "text/javascript",
+        ".jsx": "text/javascript", ".tsx": "text/javascript",
+        ".py": "text/x-python", ".rb": "text/x-ruby",
+        ".go": "text/x-go", ".rs": "text/x-rust", ".java": "text/x-java",
+        ".c": "text/x-c", ".cpp": "text/x-c++", ".h": "text/x-c",
+        ".css": "text/css", ".html": "text/html", ".xml": "application/xml",
+        ".yaml": "text/yaml", ".yml": "text/yaml", ".toml": "text/plain",
+        ".sh": "application/x-shellscript", ".sql": "application/sql",
+        ".log": "text/plain",
     }
     media_type = media_map.get(ext, "application/octet-stream")
     return FileResponse(fp, media_type=media_type)

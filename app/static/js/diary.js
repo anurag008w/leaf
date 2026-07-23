@@ -31,7 +31,7 @@
   ];
 
   const ATTACH_MAX_MB = 100;
-  const ATTACH_EXTENSIONS = ['jpg','jpeg','png','gif','webp','svg','bmp','tiff','mp4','webm','mov','avi','pdf','md','txt'];
+  const ATTACH_EXTENSIONS = ['jpg','jpeg','png','gif','webp','svg','bmp','tiff','mp4','webm','mov','avi','pdf','md','txt','json','csv','js','ts','jsx','tsx','py','rb','go','rs','java','c','cpp','h','css','html','xml','yaml','yml','toml','sh','sql','log'];
 
   /* ── State ────────────────────────────────────────────── */
   let _sel       = null;
@@ -116,7 +116,7 @@
   /* ── Save to storage + server ─────────────────────────── */
   function saveDiary() {
     try { ctx().storage().set('diary', entries()); } catch {}
-    try { fetch('/api/user-data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'diary',value:entries()})}); } catch {}
+    try { fetch('/api/user-data',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({key:'diary',value:entries()})}); } catch {}
   }
 
   /* ── Attachments ──────────────────────────────────────── */
@@ -184,9 +184,9 @@
     if(inp) inp.click();
   }
   function onFileInputChange(ev) {
-    const files = ev.target.files;
+    const files = ev?.files || ev?.target?.files;
     if(files) { for(const f of files) uploadAttachment(f); }
-    ev.target.value = '';
+    if(ev?.target) ev.target.value = '';
   }
 
   /* ── Markdown Renderer ────────────────────────────────── */
@@ -237,7 +237,11 @@
       const isImg = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff)$/i.test(a.name);
       const isVid = /\.(mp4|webm|mov|avi)$/i.test(a.name);
       const isPdf = /\.pdf$/i.test(a.name);
-      const isMd  = /\.(md|txt)$/i.test(a.name);
+      const isMd  = /\.md$/i.test(a.name);
+      const isJson = /\.json$/i.test(a.name);
+      const isCsv = /\.csv$/i.test(a.name);
+      const isCode = /\.(js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|css|html|xml|yaml|yml|toml|sh|sql)$/i.test(a.name);
+      const isTxt = /\.(txt|log)$/i.test(a.name);
       const sizeStr = a.size > 1024*1024 ? (a.size/(1024*1024)).toFixed(1)+'MB' : a.size > 1024 ? Math.round(a.size/1024)+'KB' : a.size+'B';
       const rmBtn = editable ? `<button class="dia-att-rm" onclick="event.stopPropagation();ZoneApp._diaRmAttach('${a.fileId}')" title="Remove">✕</button>` : '';
 
@@ -256,21 +260,49 @@
         </div>`;
       }
       if(isPdf) {
-        return `<div class="dia-att-card dia-att-doc" onclick="window.open('${esc(a.url)}','_blank')">
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
           ${rmBtn}
           <div class="dia-att-icon">📄</div>
           <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
         </div>`;
       }
       if(isMd) {
-        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewMd('${esc(a.url)}','${esc(a.name)}')">
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
           ${rmBtn}
           <div class="dia-att-icon">📝</div>
           <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
         </div>`;
       }
+      if(isJson) {
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
+          ${rmBtn}
+          <div class="dia-att-icon">📋</div>
+          <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
+        </div>`;
+      }
+      if(isCsv) {
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
+          ${rmBtn}
+          <div class="dia-att-icon">📊</div>
+          <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
+        </div>`;
+      }
+      if(isCode) {
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
+          ${rmBtn}
+          <div class="dia-att-icon">💻</div>
+          <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
+        </div>`;
+      }
+      if(isTxt) {
+        return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
+          ${rmBtn}
+          <div class="dia-att-icon">📄</div>
+          <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
+        </div>`;
+      }
       // Generic file
-      return `<div class="dia-att-card dia-att-doc" onclick="window.open('${esc(a.url)}','_blank')">
+      return `<div class="dia-att-card dia-att-doc" onclick="ZoneApp._diaPreviewFile('${esc(a.url)}','${esc(a.name)}')">
         ${rmBtn}
         <div class="dia-att-icon">📎</div>
         <div class="dia-att-info"><span class="dia-att-name">${esc(a.name)}</span><span class="dia-att-size">${sizeStr}</span></div>
@@ -297,27 +329,193 @@
     o.addEventListener('click', e => { if(e.target===o) closeAnyModal(); });
   }
 
-  /* ── MD Preview Modal ─────────────────────────────────── */
-  async function previewMd(url, name) {
-    closeAnyModal();
+  /* ── Universal File Preview Modal ────────────────────── */
+  function getFileType(name) {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    if (['md'].includes(ext)) return 'markdown';
+    if (['json'].includes(ext)) return 'json';
+    if (['csv'].includes(ext)) return 'csv';
+    if (['pdf'].includes(ext)) return 'pdf';
+    if (['js', 'ts', 'jsx', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'css', 'html', 'htm', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'sh', 'bash', 'sql', 'r', 'swift', 'kt', 'php', 'lua', 'dart'].includes(ext)) return 'code';
+    return 'text';
+  }
+
+  function syntaxHighlightJson(json) {
     try {
-      const r = await fetch(url);
-      const text = await r.text();
-      const o = document.createElement('div');
-      o.className = 'dia-modal-bg'; o.id = 'diaMdPreview';
-      o.innerHTML = `<div class="dia-modal" style="max-width:640px">
-        <div class="dia-modal-hdr"><h3>📝 ${esc(name)}</h3><button class="dia-x" onclick="ZoneApp._diaCloseMd()">✕</button></div>
-        <div class="dia-modal-body">
-          <div class="dia-md-preview-content">${renderMd(text)}</div>
+      const obj = typeof json === 'string' ? JSON.parse(json) : json;
+      json = JSON.stringify(obj, null, 2);
+    } catch {}
+    return esc(json).replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+      match => {
+        let cls = 'dia-json-num';
+        if (/^"/.test(match)) {
+          cls = /:$/.test(match) ? 'dia-json-key' : 'dia-json-str';
+        }
+        return `<span class="${cls}">${match}</span>`;
+      }
+    );
+  }
+
+  function syntaxHighlightCode(code, ext) {
+    const lines = esc(code).split('\n');
+    return lines.map(line => {
+      // Full-line comments
+      if (/^\s*(\/\/|#|--|%|;|"|').*/.test(line)) {
+        return `<span class="dia-code-comment">${line}</span>`;
+      }
+      // Highlight within the line (order matters — strings last to avoid inner matches)
+      let h = line;
+      // Keywords
+      const kw = '\\b(function|const|let|var|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new|typeof|instanceof|switch|case|break|default|continue|do|in|of|yield|this|super|extends|static|private|public|get|set|void|null|undefined|true|false|self|def|print|elif|pass|lambda|with|as|raise|except|finally|global|nonlocal|assert|del|True|False|None|require|module|console|log|print|include|def|end|begin|rescue|do|unless|nil|and|or|not|is|fn|pub|mod|use|impl|trait|struct|enum|match|loop|move|mut|ref|where|type|alias|interface|type|namespace|package|implements|extends|abstract|final|static|synchronized|volatile|transient|native|strictfp)\\b';
+      h = h.replace(new RegExp(kw, 'g'), '<span class="dia-code-kw">$1</span>');
+      // Strings (double + single quotes)
+      h = h.replace(/(&quot;(?:[^&]|&(?!quot;))*?&quot;|&#39;(?:[^&]|&(?!#39;))*?&#39;)/g, '<span class="dia-code-str">$1</span>');
+      // Numbers
+      h = h.replace(/\b(\d+\.?\d*)\b/g, '<span class="dia-code-num">$1</span>');
+      // Inline comments after code
+      h = h.replace(/(\/\/.*$)/g, '<span class="dia-code-comment">$1</span>');
+      return h;
+    }).join('\n');
+  }
+
+  function renderCsvTable(text) {
+    const lines = text.trim().split('\n');
+    if (lines.length === 0) return '<p style="padding:20px;color:var(--text-muted)">No data</p>';
+
+    function parseCsvLine(l) {
+      const cells = []; let cur = '', inQuote = false;
+      for (let i = 0; i < l.length; i++) {
+        if (l[i] === '"' && l[i+1] === '"') { cur += '"'; i++; }
+        else if (l[i] === '"') { inQuote = !inQuote; }
+        else if (l[i] === ',' && !inQuote) { cells.push(cur.trim()); cur = ''; }
+        else { cur += l[i]; }
+      }
+      cells.push(cur.trim());
+      return cells;
+    }
+
+    const rows = lines.map(parseCsvLine);
+    const maxCols = Math.max(...rows.map(r => r.length));
+    const header = rows[0];
+    while (header.length < maxCols) header.push('');
+    const body = rows.slice(1);
+
+    let html = '<table class="dia-csv-table"><thead><tr>';
+    html += header.map(c => `<th>${esc(c)}</th>`).join('');
+    html += '</tr></thead><tbody>';
+    body.forEach(r => {
+      while (r.length < maxCols) r.push('');
+      html += '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  function detectContentType(text) {
+    const trimmed = text.trim();
+    // Check for HTML — anywhere in content (common in saved web pages / exported files)
+    const htmlTagCount = (trimmed.match(/<(table|thead|tbody|tr|td|th|div|span|p|body|head|html|ul|ol|li|section|article|header|footer|nav|main|section|strong|em|br|hr|a |img|input|form|button|label|h[1-6])[\s>]/gi) || []).length;
+    if (htmlTagCount >= 3) return 'html';
+    // Check for JSON
+    if (/^\s*[\[{]/.test(trimmed) && /[\]}]\s*$/.test(trimmed)) {
+      try { JSON.parse(trimmed); return 'json'; } catch {}
+    }
+    // Check for CSV (multiple lines with commas)
+    const lines = trimmed.split('\n');
+    if (lines.length > 1 && lines.filter(l => l.includes(',')).length > lines.length * 0.5) return 'csv';
+    return 'text';
+  }
+
+  async function previewFile(url, name) {
+    closeAnyModal();
+    const ext = (name || '').split('.').pop().toLowerCase();
+    const ftype = getFileType(name);
+
+    const o = document.createElement('div');
+    o.className = 'dia-modal-bg'; o.id = 'diaFilePreview';
+
+    if (ftype === 'pdf') {
+      o.innerHTML = `<div class="dia-modal" style="max-width:900px;height:85vh">
+        <div class="dia-modal-hdr"><h3>📄 ${esc(name)}</h3><button class="dia-x" onclick="ZoneApp._diaClosePreview()">✕</button></div>
+        <div class="dia-modal-body" style="padding:0;flex:1;overflow:hidden">
+          <iframe src="${esc(url)}" style="width:100%;height:100%;border:none" title="${esc(name)}"></iframe>
         </div>
         <div class="dia-modal-foot">
-          <button class="dia-ctl" onclick="ZoneApp._diaCloseMd()">Close</button>
-          <a class="dia-ctl primary" href="${esc(url)}" target="_blank" download>Open Raw</a>
+          <button class="dia-ctl" onclick="ZoneApp._diaClosePreview()">Close</button>
+          <a class="dia-ctl primary" href="${esc(url)}" target="_blank" download>⬇ Download</a>
+        </div></div>`;
+      document.body.appendChild(o);
+      o.addEventListener('click', e => { if(e.target===o) closeAnyModal(); });
+      return;
+    }
+
+    // Text-based files: fetch content
+    try {
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const text = await r.text();
+      let bodyHtml = '';
+      let titleIcon = '📝';
+
+      if (ftype === 'markdown') {
+        titleIcon = '📝';
+        // If .md file actually contains HTML tags, render as HTML directly
+        const detected = detectContentType(text);
+        if (detected === 'html') {
+          bodyHtml = `<div class="dia-preview-rendered">${text}</div>`;
+        } else {
+          bodyHtml = `<div class="dia-preview-rendered">${renderMd(text)}</div>`;
+        }
+      } else if (ftype === 'json') {
+        titleIcon = '📋';
+        bodyHtml = `<pre class="dia-preview-code dia-preview-json">${syntaxHighlightJson(text)}</pre>`;
+      } else if (ftype === 'csv') {
+        titleIcon = '📊';
+        bodyHtml = `<div class="dia-preview-scroll">${renderCsvTable(text)}</div>`;
+      } else if (ftype === 'code') {
+        titleIcon = '💻';
+        bodyHtml = `<pre class="dia-preview-code dia-preview-syntax">${syntaxHighlightCode(text, ext)}</pre>`;
+      } else {
+        // Plain text — detect content type
+        const detected = detectContentType(text);
+        if (detected === 'html') {
+          titleIcon = '🌐';
+          bodyHtml = `<div class="dia-preview-rendered">${text}</div>`;
+        } else if (detected === 'json') {
+          titleIcon = '📋';
+          bodyHtml = `<pre class="dia-preview-code dia-preview-json">${syntaxHighlightJson(text)}</pre>`;
+        } else if (detected === 'csv') {
+          titleIcon = '📊';
+          bodyHtml = `<div class="dia-preview-scroll">${renderCsvTable(text)}</div>`;
+        } else {
+          titleIcon = '📄';
+          bodyHtml = `<pre class="dia-preview-code">${esc(text)}</pre>`;
+        }
+      }
+
+      // Word + line count
+      const wc = text.trim().split(/\s+/).filter(Boolean).length;
+      const lc = text.split('\n').length;
+      const meta = `${lc} lines · ${wc} words · ${text.length} chars`;
+
+      o.innerHTML = `<div class="dia-modal" style="max-width:780px;height:85vh">
+        <div class="dia-modal-hdr">
+          <h3>${titleIcon} ${esc(name)}</h3>
+          <span class="dia-preview-meta">${meta}</span>
+          <button class="dia-x" onclick="ZoneApp._diaClosePreview()">✕</button>
+        </div>
+        <div class="dia-modal-body" style="flex:1;overflow:auto;padding:0">
+          ${bodyHtml}
+        </div>
+        <div class="dia-modal-foot">
+          <button class="dia-ctl" onclick="ZoneApp._diaClosePreview()">Close</button>
+          <a class="dia-ctl primary" href="${esc(url)}" target="_blank" download>⬇ Download</a>
         </div></div>`;
       document.body.appendChild(o);
       o.addEventListener('click', e => { if(e.target===o) closeAnyModal(); });
     } catch(err) {
-      toast('Failed to load markdown', 'error');
+      toast('Failed to load file: ' + err.message, 'error');
     }
   }
 
@@ -520,7 +718,7 @@
   }
 
   function closeAnyModal(){
-    ['diaDelModal','diaExportModal','diaImportModal','diaLightbox','diaMdPreview'].forEach(id=>{
+    ['diaDelModal','diaExportModal','diaImportModal','diaLightbox','diaMdPreview','diaFilePreview'].forEach(id=>{
       const m=document.getElementById(id); if(m) m.remove();
     });
   }
@@ -806,35 +1004,34 @@
   function renderView(e) {
     const me = e.mood ? MOODS[e.mood]?.e : '';
     const moodLabel = e.mood ? MOODS[e.mood]?.l : '';
-    const tags = (e.tags||[]).map(t=>`<span class="dia-view-tag">#${esc(t)}</span>`).join('');
+    const tags = (e.tags||[]).map(t=>`<span class="dia-vw-tag">#${esc(t)}</span>`).join('');
     const created = e.created ? new Date(e.created).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     const updated = e.updated ? new Date(e.updated).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-    const contentHtml = e.content ? renderMd(e.content) : '<div class="dia-view-nocontent">No content</div>';
+    const contentHtml = e.content ? renderMd(e.content) : '<div class="dia-vw-nocontent">No content yet</div>';
     const attHtml = renderAttachments(e.attachments, false);
     const wc = e.content ? e.content.trim().split(/\s+/).length : 0;
 
     return `
-      <div class="dia-ed-top">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="dia-ed-date dia-view-date">${fmtDFull(e.date)}</span>
-        </div>
-        <div class="dia-ed-acts">
+      <div class="dia-vw-top">
+        <span class="dia-vw-date-full">📅 ${fmtDFull(e.date)}</span>
+        <div class="dia-vw-acts">
           <button class="dia-ctl" onclick="ZoneApp._diaToggleView()" title="Edit Mode">✏️ Edit</button>
           <button class="dia-ctl danger" onclick="ZoneApp._diaDel('${e.id}')">🗑</button>
         </div>
       </div>
-      <div class="dia-view-body">
-        <div class="dia-view-head">
-          ${me ? `<span class="dia-view-mood">${me} ${moodLabel}</span>` : ''}
-          <h1 class="dia-view-title">${esc(e.title||'Untitled')}</h1>
-          <div class="dia-view-meta">
-            <span>📅 ${created}</span>
-            ${updated !== created ? `<span> · Updated ${updated}</span>` : ''}
-            <span> · ${wc} word${wc!==1?'s':''}</span>
+      <div class="dia-vw-body">
+        <div class="dia-vw-head">
+          ${me ? `<div class="dia-vw-mood-badge">${me} <span>${moodLabel}</span></div>` : ''}
+          <h1 class="dia-vw-title">${esc(e.title||'Untitled')}</h1>
+          <div class="dia-vw-meta">
+            <span>Created ${created}</span>
+            ${updated !== created ? `<span class="dia-vw-meta-dot"></span><span>Updated ${updated}</span>` : ''}
+            <span class="dia-vw-meta-dot"></span>
+            <span>${wc} word${wc!==1?'s':''}</span>
           </div>
-          ${tags ? `<div class="dia-view-tags">${tags}</div>` : ''}
+          ${tags ? `<div class="dia-vw-tags">${tags}</div>` : ''}
         </div>
-        <div class="dia-view-content">${contentHtml}</div>
+        <div class="dia-vw-content">${contentHtml}</div>
         ${attHtml}
       </div>`;
   }
@@ -899,10 +1096,10 @@
   ZoneApp._diaTriggerFile   = triggerFileInput;
   ZoneApp._diaFileInput     = onFileInputChange;
   ZoneApp._diaRmAttach      = removeAttachment;
-  // Lightbox + MD preview
+  // Lightbox + File Preview
   ZoneApp._diaLightbox      = openLightbox;
-  ZoneApp._diaPreviewMd     = previewMd;
+  ZoneApp._diaPreviewFile   = previewFile;
   ZoneApp._diaCloseLb       = closeAnyModal;
-  ZoneApp._diaCloseMd       = closeAnyModal;
+  ZoneApp._diaClosePreview  = closeAnyModal;
 
 })();
