@@ -214,8 +214,8 @@
     const isTimeTravel = state().selectedDate != null;
     const travelDate = state().selectedDate || todayKey();
 
-    // Time travel: only show todos created on that date
-    let dayTodos = isTimeTravel ? allTodos.filter(t => t.created === travelDate) : allTodos;
+    // Always filter by the active date (today or time-travel date)
+    let dayTodos = allTodos.filter(t => t.created === travelDate);
 
     let filtered = dayTodos;
     if (filterDone === 1) filtered = filtered.filter(t => !t.done);
