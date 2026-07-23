@@ -1898,6 +1898,11 @@ const ZoneApp = (() => {
     zs.zoneElapsed = 0;
     zs.lastTick = null;
     if (state.dayComplete) state.dayComplete = false;
+
+    // Force-save: reset the debounce timer so the rolled-back state actually
+    // persists to localStorage + server. Without this, logEvent('stop') above
+    // calls saveState() first, and the final saveState() here gets debounced out.
+    state._lastStateSave = 0;
     saveState();
     renderAll();
     toast('Zone reset — stats rolled back', 'info');
