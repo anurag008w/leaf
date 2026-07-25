@@ -436,6 +436,8 @@ def _update_preview():
     spd = "Slow" if slider_speed.get() < 0.33 else ("Fast" if slider_speed.get() >= 0.66 else "Med")
     lbl_preview.configure(text=f"Fade {d:.1f}s · {h}% hidden · {spd}")
 
+_saved_ov = load_overlay_settings()
+
 ctk.CTkLabel(ov_cfg, text="Hide after", font=(F, 10),
              text_color=MUTED).grid(row=0, column=0, sticky="w", pady=4)
 lbl_delay_val = ctk.CTkLabel(ov_cfg, text=f"{_saved_ov['delay_s']:.1f}s", font=(FM, 9, "bold"),
@@ -447,7 +449,6 @@ slider_delay = ctk.CTkSlider(ov_cfg, from_=0, to=10, number_of_steps=20,
                               button_color=CYAN, button_hover_color="#2ba8dd",
                               command=_on_delay_changed)
 slider_delay.grid(row=0, column=1, sticky="e", pady=4, padx=(6, 6))
-_saved_ov = load_overlay_settings()
 slider_delay.set(_saved_ov["delay_s"])
 
 ctk.CTkLabel(ov_cfg, text="Hide %", font=(F, 10),
