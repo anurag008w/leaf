@@ -885,7 +885,7 @@ async def timer_control(body: TimerControlBody, request: Request):
     uname = getattr(request.state, "username", None)
     if not uname:
         return {"status": "ok", "guest": True}
-    if body.action not in ("start", "pause", "skip", "stop"):
+    if body.action not in ("start", "pause", "skip", "stop", "break"):
         raise HTTPException(400, "invalid action")
 
     data = read_user_data(uname)
@@ -933,6 +933,26 @@ async def timer_control(body: TimerControlBody, request: Request):
             zs["blockComplete"] = False
             zs["overtimeSeconds"] = 0
             zs["lastTick"] = now * 1000
+        elif body.action == "break":
+            # "Take Break" — transition from overtime/completed focus to break
+            if zs.get("blockComplete"):
+                zs["blockType"] = "break"
+                config = _read_json(user_dir(uname) / "config.json") or load_config()
+                zones_cfg = config.get("zones", [])
+                z_cfg = zones_cfg[idx] if idx < len(zones_cfg) else {}
+                cycle = zs.get("cycle", 0)
+                long_every = z_cfg.get("cyclesBeforeLongBreak", 4)
+                if long_every > 0 and (cycle + 1) % long_every == 0:
+                    break_min = z_cfg.get("longBreakDuration", 15)
+                else:
+                    break_min = z_cfg.get("breakDuration", 5)
+                zs["remaining"] = break_min * 60
+                zs["total"] = break_min * 60
+                zs["elapsed"] = 0
+                zs["blockComplete"] = False
+                zs["running"] = True
+                zs["lastTick"] = now * 1000
+                zs["overtimeSeconds"] = 0
 
     write_user_data(uname, "session", session)
     log.info("timer control from desktop: %s by %s", body.action, uname)

@@ -371,6 +371,9 @@ btns["skip"] = mk_btn(ctrl, "SKIP", CYAN, lambda: send_control("skip"))
 btns["skip"].grid(row=1, column=0, sticky="ew", padx=(8, 3), pady=(3, 8))
 btns["stop"] = mk_btn(ctrl, "RESET", RED, lambda: send_control("stop"))
 btns["stop"].grid(row=1, column=1, sticky="ew", padx=(3, 8), pady=(3, 8))
+btns["break"] = mk_btn(ctrl, "☕  TAKE BREAK", AMBER, lambda: send_control("break"), True)
+btns["break"].grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(3, 8))
+btns["break"].grid_remove()  # hidden by default, shown when blockComplete
 
 ctrl.grid_columnconfigure(0, weight=1)
 ctrl.grid_columnconfigure(1, weight=1)
@@ -641,17 +644,22 @@ def _redraw():
     d = get_session_data()
     remaining = d["remaining"]
     total = d["total"]
-    progress = (remaining / total) if total > 0 else 0
+    if d["day_complete"] or d["block_complete"]:
+        progress = 1.0  # full ring in overtime or day complete
+    else:
+        progress = (remaining / total) if total > 0 else 0
 
     # Color based on block type
     global _ov_color
-    if d["block_type"] == "focus":
+    if d["day_complete"]:
+        _ov_color = GREEN
+    elif d["block_complete"]:
+        _ov_color = RED
+    elif d["block_type"] == "focus":
         _ov_color = CYAN
     elif d["block_type"] == "break":
         _ov_color = AMBER
     else:
-        _ov_color = GREEN
-    if d["day_complete"]:
         _ov_color = GREEN
 
     label = "FOCUS" if d["block_type"] == "focus" else "BREAK"
@@ -660,8 +668,16 @@ def _redraw():
     status = "RUNNING" if d["running"] else ("OVERTIME" if d["block_complete"] else "PAUSED")
 
     global _ov_timer_text, _ov_label_text
-    _ov_timer_text = fmt_time(remaining)
-    _ov_label_text = f"{label} · {status}"
+    if d["day_complete"]:
+        _ov_timer_text = "✓ DONE"
+        _ov_label_text = "ALL ZONES COMPLETE"
+    elif d["block_complete"]:
+        ot_sec = int(d["overtime"])
+        _ov_timer_text = f"+{fmt_time(ot_sec)}"
+        _ov_label_text = "OVERTIME · TAKE BREAK"
+    else:
+        _ov_timer_text = fmt_time(remaining)
+        _ov_label_text = f"{label} · {status}"
     zone_txt = f"Z{d['zone_idx']+1}/{d['total_zones']} · C{d['cycle']+1}/4"
 
     _draw_ring(progress, _ov_color, _ov_timer_text, _ov_label_text,
@@ -675,6 +691,15 @@ def _redraw():
         else:
             ov_b_toggle.configure(text="▶", fg_color="#0d1e2a",
                                   hover_color="#132a3a")
+
+    # Overlay skip button → "Take Break" when blockComplete
+    if ov_b_skip is not None:
+        if d["block_complete"]:
+            ov_b_skip.configure(text="☕", fg_color=AMBER, hover_color="#c27030",
+                                command=lambda: send_control("break"))
+        else:
+            ov_b_skip.configure(text="⏭", fg_color=TEXT_SEC, hover_color="#3a4a5c",
+                                command=lambda: send_control("skip"))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1056,7 +1081,7 @@ def _on_control_result(action, result):
         add_log(f"→ {action.upper()}")
         if result.get("session"):
             server_state["session"] = result["session"]
-            if action in ("pause", "stop"):
+            if action in ("pause", "stop", "break"):
                 _touch_last_tick()
             refresh_from_server()
     else:
@@ -1109,25 +1134,30 @@ def _on_poll_error(err):
 # ══════════════════════════════════════════════════════════════
 def refresh_from_server():
     d = get_session_data()
-    if d["block_type"] == "focus":
-        fg = CYAN
-    elif d["block_type"] == "break":
-        fg = AMBER
-    else:
-        fg = GREEN
-    label = "FOCUS" if d["block_type"] == "focus" else "BREAK"
     if d["day_complete"]:
-        label = "COMPLETE"
         fg = GREEN
-    status = "RUNNING" if d["running"] else ("OVERTIME" if d["block_complete"] else "PAUSED")
-
-    is_overtime = d["block_complete"] and d["overtime"] > 0
+        label = "COMPLETE"
+    elif d["block_complete"]:
+        fg = RED
+        label = "FOCUS"
+    elif d["block_type"] == "focus":
+        fg = CYAN
+        label = "FOCUS"
+    else:
+        fg = AMBER
+        label = "BREAK"
+    status = "DAY DONE" if d["day_complete"] else ("TAKE BREAK" if d["block_complete"] else ("RUNNING" if d["running"] else "PAUSED"))
 
     # Main window
     lbl_zone_name.configure(text=d["zone_title"], text_color=fg)
     lbl_zone_sub.configure(text=f"Zone {d['zone_idx'] + 1}/{d['total_zones']}  ·  {d['focus_dur']}min")
 
-    if is_overtime:
+    if d["day_complete"]:
+        lbl_time.configure(text="✓", text_color=GREEN)
+        lbl_status.configure(text="ALL ZONES COMPLETE", text_color=GREEN)
+        pbar.configure(progress_color=GREEN)
+        pbar.set(1.0)
+    elif d["block_complete"]:
         # Show overtime with + prefix and red color
         ot_sec = int(d["overtime"])
         # Also compute live OT from last_tick if running
@@ -1143,9 +1173,9 @@ def refresh_from_server():
                 except (TypeError, ValueError):
                     pass
         lbl_time.configure(text=f"+{fmt_time(ot_sec)}", text_color=RED)
-        lbl_status.configure(text=f"{label}  ·  Cycle {d['cycle'] + 1}  ·  OVERTIME", text_color=RED)
+        lbl_status.configure(text=f"FOCUS  ·  Cycle {d['cycle'] + 1}  ·  TAKE BREAK", text_color=RED)
         pbar.configure(progress_color=RED)
-        pbar.set(0)  # no progress in overtime
+        pbar.set(1.0)  # full bar in overtime
     else:
         lbl_time.configure(text=fmt_time(d["remaining"]), text_color=fg)
         lbl_status.configure(text=f"{label}  ·  Cycle {d['cycle'] + 1}  ·  {status}", text_color=fg)
@@ -1163,6 +1193,14 @@ def refresh_from_server():
         btns["toggle"].configure(text="▶  START", fg_color=CYAN, text_color=BG,
                                  hover_color="#2ba8dd", border_color=LINE)
 
+    # Take Break button — show when blockComplete, hide otherwise
+    if d["block_complete"]:
+        btns["break"].grid()
+        btns["skip"].grid_remove()
+    else:
+        btns["break"].grid_remove()
+        btns["skip"].grid()
+
     # Overlay — redraw ring
     if overlay_visible:
         _redraw()
@@ -1174,9 +1212,11 @@ def refresh_from_server():
         lbl_conn.configure(text="●", text_color=RED)
 
     # Window title
-    if is_overtime:
+    if d["day_complete"]:
+        app.title("✓ Day Complete!")
+    elif d["block_complete"]:
         ot_sec = int(d["overtime"])
-        app.title(f"+{fmt_time(ot_sec)} OVERTIME — {d['zone_title']}")
+        app.title(f"+{fmt_time(ot_sec)} TAKE BREAK — {d['zone_title']}")
     elif d["remaining"] > 0:
         app.title(f"{fmt_time(d['remaining'])} — {d['zone_title']}")
     else:
