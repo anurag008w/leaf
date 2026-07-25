@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=Zone Timer
 Comment=Floating desktop timer for Zone Study OS
-Exec=bash -c 'cd "$HOME/Desktop/zone-timer" && exec bash ZoneTimer.sh'
+Exec=bash -c 'cd "$(dirname %k)" && ([ -f timer.py ] && python3 timer.py 2>/dev/null || x-terminal-emulator -e bash ZoneTimer.sh)'
 Icon=preferences-system-time
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Education;
 StartupNotify=false

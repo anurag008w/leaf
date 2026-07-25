@@ -92,9 +92,9 @@ if [ ! -f "$DESKTOP_FILE" ]; then
 [Desktop Entry]
 Name=Zone Timer
 Comment=Floating desktop timer for Zone Study OS
-Exec=bash -c 'cd "$APP_DIR" && exec bash ZoneTimer.sh'
+Exec=bash -c 'cd "$APP_DIR" && ([ -f timer.py ] && python3 timer.py 2>/dev/null || x-terminal-emulator -e bash ZoneTimer.sh)'
 Icon=preferences-system-time
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Utility;Education;
 StartupNotify=false
