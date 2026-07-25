@@ -85,10 +85,29 @@ def load_saved_config() -> dict:
 
 def save_config(url: str, username: str, password: str):
     try:
-        CONFIG_FILE.write_text(json.dumps(
-            {"url": url, "username": username, "password": password}, indent=2))
+        existing = load_saved_config()
+        existing.update({"url": url, "username": username, "password": password})
+        CONFIG_FILE.write_text(json.dumps(existing, indent=2))
     except Exception:
         pass
+
+def save_overlay_settings(delay_s: float, hide_pct: float, speed: float):
+    """Persist overlay fade settings so they survive restart."""
+    try:
+        existing = load_saved_config()
+        existing["overlay"] = {"delay_s": delay_s, "hide_pct": hide_pct, "speed": speed}
+        CONFIG_FILE.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+
+def load_overlay_settings() -> dict:
+    """Load saved overlay settings, or defaults if none saved."""
+    cfg = load_saved_config().get("overlay", {})
+    return {
+        "delay_s": cfg.get("delay_s", 3.0),
+        "hide_pct": cfg.get("hide_pct", 85),
+        "speed": cfg.get("speed", 0.5),
+    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -139,11 +158,12 @@ class ZoneAPI:
 # ══════════════════════════════════════════════════════════════
 # FADE SETTINGS
 # ══════════════════════════════════════════════════════════════
+_saved_ov_init = load_overlay_settings()
 fade_settings = {
     "full_alpha": 0.92,
-    "idle_alpha": 0.12,
-    "delay_ms": 3000,
-    "fade_speed": 0.04,
+    "idle_alpha": round(1.0 - _saved_ov_init["hide_pct"] / 100.0, 2),
+    "delay_ms": int(_saved_ov_init["delay_s"] * 1000),
+    "fade_speed": 0.02 if _saved_ov_init["speed"] < 0.33 else (0.08 if _saved_ov_init["speed"] >= 0.66 else 0.04),
 }
 
 
@@ -384,6 +404,8 @@ def _apply_overlay_settings_live(*_):
     fade_settings["idle_alpha"] = round(1.0 - hide_pct / 100.0, 2)
     spd = slider_speed.get()
     fade_settings["fade_speed"] = 0.02 if spd < 0.33 else (0.08 if spd >= 0.66 else 0.04)
+    # Save to config so it persists across restarts
+    save_overlay_settings(slider_delay.get(), slider_hide.get(), slider_speed.get())
     # Update preview text
     _update_preview()
     if overlay_visible:
@@ -416,7 +438,7 @@ def _update_preview():
 
 ctk.CTkLabel(ov_cfg, text="Hide after", font=(F, 10),
              text_color=MUTED).grid(row=0, column=0, sticky="w", pady=4)
-lbl_delay_val = ctk.CTkLabel(ov_cfg, text="3.0s", font=(FM, 9, "bold"),
+lbl_delay_val = ctk.CTkLabel(ov_cfg, text=f"{_saved_ov['delay_s']:.1f}s", font=(FM, 9, "bold"),
                               text_color=TEXT, width=34)
 lbl_delay_val.grid(row=0, column=2, sticky="e", pady=4)
 slider_delay = ctk.CTkSlider(ov_cfg, from_=0, to=10, number_of_steps=20,
@@ -425,11 +447,12 @@ slider_delay = ctk.CTkSlider(ov_cfg, from_=0, to=10, number_of_steps=20,
                               button_color=CYAN, button_hover_color="#2ba8dd",
                               command=_on_delay_changed)
 slider_delay.grid(row=0, column=1, sticky="e", pady=4, padx=(6, 6))
-slider_delay.set(3)
+_saved_ov = load_overlay_settings()
+slider_delay.set(_saved_ov["delay_s"])
 
 ctk.CTkLabel(ov_cfg, text="Hide %", font=(F, 10),
              text_color=MUTED).grid(row=1, column=0, sticky="w", pady=4)
-lbl_hide_val = ctk.CTkLabel(ov_cfg, text="85%", font=(FM, 9, "bold"),
+lbl_hide_val = ctk.CTkLabel(ov_cfg, text=f"{int(_saved_ov['hide_pct'])}%", font=(FM, 9, "bold"),
                              text_color=TEXT, width=34)
 lbl_hide_val.grid(row=1, column=2, sticky="e", pady=4)
 slider_hide = ctk.CTkSlider(ov_cfg, from_=10, to=95, number_of_steps=17,
@@ -438,11 +461,12 @@ slider_hide = ctk.CTkSlider(ov_cfg, from_=10, to=95, number_of_steps=17,
                              button_color=CYAN, button_hover_color="#2ba8dd",
                              command=_on_hide_changed)
 slider_hide.grid(row=1, column=1, sticky="e", pady=4, padx=(6, 6))
-slider_hide.set(85)
+slider_hide.set(_saved_ov["hide_pct"])
 
 ctk.CTkLabel(ov_cfg, text="Speed", font=(F, 10),
              text_color=MUTED).grid(row=2, column=0, sticky="w", pady=4)
-lbl_speed_val = ctk.CTkLabel(ov_cfg, text="Med", font=(FM, 9, "bold"),
+_init_spd_label = "Slow" if _saved_ov["speed"] < 0.33 else ("Fast" if _saved_ov["speed"] >= 0.66 else "Med")
+lbl_speed_val = ctk.CTkLabel(ov_cfg, text=_init_spd_label, font=(FM, 9, "bold"),
                               text_color=TEXT, width=34)
 lbl_speed_val.grid(row=2, column=2, sticky="e", pady=4)
 slider_speed = ctk.CTkSlider(ov_cfg, from_=0, to=1, number_of_steps=20,
@@ -451,7 +475,7 @@ slider_speed = ctk.CTkSlider(ov_cfg, from_=0, to=1, number_of_steps=20,
                               button_color=CYAN, button_hover_color="#2ba8dd",
                               command=_on_speed_changed)
 slider_speed.grid(row=2, column=1, sticky="e", pady=4, padx=(6, 6))
-slider_speed.set(0.5)
+slider_speed.set(_saved_ov["speed"])
 
 ov_cfg.columnconfigure(0, weight=1)
 
