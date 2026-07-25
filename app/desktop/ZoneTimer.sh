@@ -2,6 +2,13 @@
 # ╔══════════════════════════════════════════╗
 # ║   ZONE TIMER — Desktop Floating Timer   ║
 # ╚══════════════════════════════════════════╝
+#
+# HOW TO RUN:
+#   1. Open a terminal in this folder
+#   2. Run:  bash ZoneTimer.sh
+#
+# (Double-click won't work on most Linux desktops —
+#  .sh files open in text editor by default)
 
 cd "$(dirname "$0")"
 
@@ -35,12 +42,30 @@ else
     echo "  [+] All dependencies ready."
 fi
 
+# ── Get server URL (saved or prompt) ──
+SERVER_URL=""
+if [ -f "server.txt" ]; then
+    SERVER_URL=$(cat server.txt | tr -d '[:space:]')
+fi
+if [ -z "$SERVER_URL" ]; then
+    echo ""
+    echo "  Enter your Zone OS server URL (e.g. https://yoursite.com)"
+    read -rp "  URL: " SERVER_URL
+    if [ -z "$SERVER_URL" ]; then
+        echo "  [!] No URL entered. Exiting."
+        exit 1
+    fi
+    echo "$SERVER_URL" > server.txt
+    echo "  [+] Saved to server.txt"
+fi
+
 # ── Download timer.py if missing ──
 if [ ! -f "timer.py" ]; then
-    echo "  [*] Downloading timer app from server..."
-    python3 -c "import urllib.request; urllib.request.urlretrieve('https://anuragw088-zone.hf.space/api/desktop/app', 'timer.py')"
+    echo "  [*] Downloading timer app from $SERVER_URL..."
+    python3 -c "import urllib.request; urllib.request.urlretrieve('$SERVER_URL/api/desktop/app', 'timer.py')"
     if [ $? -ne 0 ]; then
-        echo "  [!] Download failed. Check internet connection."
+        echo "  [!] Download failed. Check URL and internet."
+        echo "  [!] Delete server.txt and try again."
         exit 1
     fi
     chmod +x timer.py

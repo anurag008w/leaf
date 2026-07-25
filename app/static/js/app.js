@@ -3856,7 +3856,8 @@ const ZoneApp = (() => {
                     </div>
                   </div>
                   <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
-                    <b style="color:var(--text-primary)">Quick start:</b> Download <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">ZoneTimer.sh</code> → <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">chmod +x ZoneTimer.sh && ./ZoneTimer.sh</code>
+                    <b style="color:var(--text-primary)">Recommended:</b> Download <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">timer.py</code> → double-click (works if Python opens on double-click)<br>
+                    <b style="color:var(--text-primary)">Or via terminal:</b> <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">bash ZoneTimer.sh</code>
                   </div>
                   <div style="display:flex;gap:8px;flex-wrap:wrap">
                     <a href="/api/desktop/launcher/linux" download class="ctl primary" style="padding:8px 16px;font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">📥 Download Launcher (.sh)</a>

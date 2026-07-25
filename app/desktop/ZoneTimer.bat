@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 title Zone Timer — Desktop Overlay
 color 0B
 cd /d "%~dp0"
@@ -32,17 +33,38 @@ if %ERRORLEVEL% neq 0 (
         pause
         exit /b 1
     )
-    echo  [+] Dependencies installed successfully!
+    echo  [+] Dependencies installed!
 ) else (
     echo  [+] All dependencies ready.
 )
 
+:: ── Get server URL (saved or prompt) ──
+set SERVER_URL=
+if exist "server.txt" (
+    set /p SERVER_URL=<server.txt
+    :: trim whitespace
+    for /f "tokens=*" %%a in ("!SERVER_URL!") do set SERVER_URL=%%a
+)
+if "!SERVER_URL!"=="" (
+    echo.
+    echo  Enter your Zone OS server URL (e.g. https://yoursite.com)
+    set /p SERVER_URL="  URL: "
+    if "!SERVER_URL!"=="" (
+        echo  [!] No URL entered. Exiting.
+        pause
+        exit /b 1
+    )
+    echo !SERVER_URL!> server.txt
+    echo  [+] Saved to server.txt
+)
+
 :: ── Download timer.py if missing ──
 if not exist "timer.py" (
-    echo  [*] Downloading timer app from server...
-    python -c "import urllib.request; urllib.request.urlretrieve('https://anuragw088-zone.hf.space/api/desktop/app', 'timer.py')"
+    echo  [*] Downloading timer app from !SERVER_URL!...
+    python -c "import urllib.request; urllib.request.urlretrieve('!SERVER_URL!/api/desktop/app', 'timer.py')"
     if %ERRORLEVEL% neq 0 (
-        echo  [!] Download failed. Check your internet connection.
+        echo  [!] Download failed. Check URL and internet connection.
+        echo  [!] Delete server.txt and try again.
         pause
         exit /b 1
     )

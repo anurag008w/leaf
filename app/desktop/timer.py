@@ -196,7 +196,7 @@ app.geometry("360x520")
 app.configure(fg_color=BG)
 app.resizable(False, False)
 
-api = ZoneAPI("https://anuragw088-zone.hf.space")
+api = ZoneAPI(saved.get("url", ""))
 
 server_state = {
     "connected": False,
@@ -232,7 +232,7 @@ ctk.CTkLabel(login_frame, text="Connect to your Zone OS",
 saved = load_saved_config()
 
 for label_text, default_val, key in [
-    ("Server", "https://anuragw088-zone.hf.space", "url"),
+    ("Server", "", "url"),
     ("Username", "", "username"),
     ("Password", "", "password"),
 ]:
