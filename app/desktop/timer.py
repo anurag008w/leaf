@@ -109,6 +109,29 @@ def load_overlay_settings() -> dict:
         "speed": cfg.get("speed", 0.5),
     }
 
+# ── App preferences (sound, notifications, etc.) ──
+DEFAULT_APP_PREFS = {
+    "sound_enabled": True,
+    "sound_pack": "default",
+    "notif_enabled": True,
+    "quiet_mode": False,
+    "auto_start_breaks": False,
+}
+
+def save_app_prefs(prefs: dict):
+    """Persist app preferences to config file."""
+    try:
+        existing = load_saved_config()
+        existing["app_prefs"] = prefs
+        CONFIG_FILE.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+
+def load_app_prefs() -> dict:
+    """Load saved app preferences, or defaults."""
+    saved = load_saved_config().get("app_prefs", {})
+    return {**DEFAULT_APP_PREFS, **saved}
+
 
 # ══════════════════════════════════════════════════════════════
 # API CLIENT
@@ -225,6 +248,157 @@ server_state = {
     "zones": [],
     "polling": False,
 }
+
+# ══════════════════════════════════════════════════════════════
+# NOTIFICATIONS + SOUNDS + TOAST
+# ══════════════════════════════════════════════════════════════
+_prev_poll_state = {}  # track state changes between polls
+
+def _system_notify(title, body):
+    """Cross-platform desktop notification (no extra deps)."""
+    if not app_prefs["notif_enabled"] or app_prefs["quiet_mode"]:
+        return
+    def _do():
+        try:
+            import platform
+            system = platform.system()
+            if system == "Linux":
+                subprocess.Popen(["notify-send", "-a", "Zone Timer", title, body],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif system == "Darwin":
+                script = f'display notification "{body}" with title "{title}" sound name "Glass"'
+                subprocess.Popen(["osascript", "-e", script],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif system == "Windows":
+                ps = (
+                    f'[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, '
+                    f'ContentType = WindowsRuntime] > $null; '
+                    f'$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(0); '
+                    f'$text = $xml.GetElementsByTagName(\'text\'); '
+                    f'$text.AppendChild($xml.CreateTextNode(\'{title}\')) > $null; '
+                    f'$text.AppendChild($xml.CreateTextNode(\'{body}\')) > $null; '
+                    f'$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); '
+                    f'[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\'Zone Timer\').Show($toast)'
+                )
+                subprocess.Popen(["powershell", "-Command", ps],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    threading.Thread(target=_do, daemon=True).start()
+
+# ── Sound system (cross-platform, zero deps) ──
+def _beep(freq=880, dur_ms=150):
+    """Generate a beep using platform-native commands."""
+    def _do():
+        try:
+            import platform, math, struct, tempfile
+            system = platform.system()
+            sample_rate = 22050
+            n_samples = int(sample_rate * dur_ms / 1000)
+            # Generate sine wave PCM
+            samples = []
+            for i in range(n_samples):
+                t = i / sample_rate
+                # Fade out in last 20%
+                env = 1.0 if i < n_samples * 0.8 else 1.0 - (i - n_samples * 0.8) / (n_samples * 0.2)
+                val = int(16000 * env * math.sin(2 * math.pi * freq * t))
+                samples.append(struct.pack('<h', max(-32768, min(32767, val))))
+            pcm = b''.join(samples)
+
+            if system == "Linux":
+                # Write WAV and play with paplay/aplay
+                wav = _make_wav(pcm, sample_rate)
+                for cmd in [["paplay", "--raw"], ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", "22050", "-c", "1"]]:
+                    try:
+                        if cmd[0] == "paplay":
+                            tmp = Path(tempfile.mktemp(suffix=".wav"))
+                            tmp.write_bytes(wav)
+                            subprocess.Popen(cmd + [str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        else:
+                            tmp = Path(tempfile.mktemp(suffix=".raw"))
+                            tmp.write_bytes(pcm)
+                            subprocess.Popen(cmd + [str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        break
+                    except FileNotFoundError:
+                        continue
+            elif system == "Darwin":
+                wav = _make_wav(pcm, sample_rate)
+                tmp = Path(tempfile.mktemp(suffix=".wav"))
+                tmp.write_bytes(wav)
+                subprocess.Popen(["afplay", str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif system == "Windows":
+                import winsound
+                winsound.Beep(freq, dur_ms)
+        except Exception:
+            pass
+    threading.Thread(target=_do, daemon=True).start()
+
+def _make_wav(pcm_data, sample_rate):
+    """Create a WAV file header + PCM data."""
+    import struct
+    data_size = len(pcm_data)
+    header = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
+    fmt = struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, 1, sample_rate, sample_rate * 2, 2, 16)
+    data_header = struct.pack('<4sI', b'data', data_size)
+    return header + fmt + data_header + pcm_data
+
+# ── Sound packs (same as web app) ──
+SOUND_PACKS = {
+    "default": {"label": "Default", "complete": [(660, 120), (880, 120), (1046, 220)], "breakstart": [(500, 180)], "transition": [(660, 120), (880, 140)]},
+    "soft":    {"label": "Soft",    "complete": [(440, 200), (550, 200), (660, 300)], "breakstart": [(330, 250)], "transition": [(440, 200), (550, 200)]},
+    "digital": {"label": "Digital", "complete": [(800, 80), (1000, 80), (1200, 150)], "breakstart": [(600, 100)], "transition": [(800, 80), (1000, 80)]},
+    "nature":  {"label": "Nature (Silent)", "complete": [], "breakstart": [], "transition": []},
+}
+
+app_prefs = load_app_prefs()
+
+def chime(kind):
+    """Play a chime sequence."""
+    if not app_prefs["sound_enabled"] or app_prefs["quiet_mode"]:
+        return
+    pack = SOUND_PACKS.get(app_prefs["sound_pack"], SOUND_PACKS["default"])
+    notes = pack.get(kind, [])
+    delay = 0
+    for freq, dur in notes:
+        _time.sleep(delay / 1000)
+        _beep(freq, dur)
+        delay = dur + 40
+
+def chime_async(kind):
+    """Play chime in background thread."""
+    threading.Thread(target=chime, args=(kind,), daemon=True).start()
+
+# ── Toast banner (in-app visual alert) ──
+_toast_id = None
+def _show_toast(text, color=GREEN, duration_ms=4000):
+    """Show a toast banner at the top of the main window."""
+    if app_prefs["quiet_mode"]:
+        return
+    global _toast_id
+    try:
+        if _toast_id is not None:
+            try: _toast_id.destroy()
+            except Exception: pass
+        toast = ctk.CTkToplevel(app)
+        toast.withdraw()
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        try: toast.attributes("-alpha", 0.95)
+        except Exception: pass
+        w, h = 360, 44
+        x = app.winfo_x() + (app.winfo_width() - w) // 2
+        y = app.winfo_y() + 40
+        toast.geometry(f"{w}x{h}+{x}+{y}")
+        frame = ctk.CTkFrame(toast, fg_color=BG2, corner_radius=8,
+                             border_width=1, border_color=color)
+        frame.pack(fill="both", expand=True)
+        ctk.CTkLabel(frame, text=text, font=(FM, 10, "bold"),
+                     text_color=color).pack(padx=12, pady=6)
+        toast.deiconify()
+        _toast_id = toast
+        toast.after(duration_ms, lambda: (toast.destroy() if _toast_id == toast else None))
+    except Exception:
+        pass
 
 compact_mode = True
 
@@ -487,6 +661,101 @@ lbl_preview = ctk.CTkLabel(sec_overlay.content, text="", font=(F, 8), text_color
 lbl_preview.pack(padx=8, pady=(0, 6))
 _update_preview()
 
+# ══════════════════════════════════════════════════════════════
+# APP SETTINGS — Sound, Notifications, Behavior
+# ══════════════════════════════════════════════════════════════
+sec_app = CollapsibleSection(expandable_frame, "SOUND & NOTIFICATIONS", start_collapsed=True)
+app_cfg = ctk.CTkFrame(sec_app.content, fg_color="transparent")
+app_cfg.pack(fill="x", padx=8, pady=(4, 4))
+
+def _save_app_setting(key, value):
+    app_prefs[key] = value
+    save_app_prefs(app_prefs)
+
+# ── Row 0: Sound On/Off ──
+ctk.CTkLabel(app_cfg, text="Sound", font=(F, 10),
+             text_color=MUTED).grid(row=0, column=0, sticky="w", pady=4)
+var_sound = ctk.BooleanVar(value=app_prefs["sound_enabled"])
+def _on_sound_toggle(v):
+    _save_app_setting("sound_enabled", v)
+sw_sound = ctk.CTkSwitch(app_cfg, text="", variable=var_sound,
+                          onvalue=True, offvalue=False,
+                          button_color=CYAN, button_hover_color="#2ba8dd",
+                          progress_color=CYAN, fg_color=BG3,
+                          command=lambda: _on_sound_toggle(var_sound.get()))
+sw_sound.grid(row=0, column=1, sticky="e", pady=4)
+
+# ── Row 1: Notification On/Off ──
+ctk.CTkLabel(app_cfg, text="Notifications", font=(F, 10),
+             text_color=MUTED).grid(row=1, column=0, sticky="w", pady=4)
+var_notif = ctk.BooleanVar(value=app_prefs["notif_enabled"])
+def _on_notif_toggle(v):
+    _save_app_setting("notif_enabled", v)
+sw_notif = ctk.CTkSwitch(app_cfg, text="", variable=var_notif,
+                           onvalue=True, offvalue=False,
+                           button_color=GREEN, button_hover_color="#2cc77a",
+                           progress_color=GREEN, fg_color=BG3,
+                           command=lambda: _on_notif_toggle(var_notif.get()))
+sw_notif.grid(row=1, column=1, sticky="e", pady=4)
+
+# ── Row 2: Quiet Mode ──
+ctk.CTkLabel(app_cfg, text="Quiet Mode", font=(F, 10),
+             text_color=MUTED).grid(row=2, column=0, sticky="w", pady=4)
+var_quiet = ctk.BooleanVar(value=app_prefs["quiet_mode"])
+def _on_quiet_toggle(v):
+    _save_app_setting("quiet_mode", v)
+sw_quiet = ctk.CTkSwitch(app_cfg, text="", variable=var_quiet,
+                           onvalue=True, offvalue=False,
+                           button_color=AMBER, button_hover_color="#d4a017",
+                           progress_color=AMBER, fg_color=BG3,
+                           command=lambda: _on_quiet_toggle(var_quiet.get()))
+sw_quiet.grid(row=2, column=1, sticky="e", pady=4)
+
+# ── Row 3: Auto-start Breaks ──
+ctk.CTkLabel(app_cfg, text="Auto-start Breaks", font=(F, 10),
+             text_color=MUTED).grid(row=3, column=0, sticky="w", pady=4)
+var_auto = ctk.BooleanVar(value=app_prefs["auto_start_breaks"])
+def _on_auto_toggle(v):
+    _save_app_setting("auto_start_breaks", v)
+sw_auto = ctk.CTkSwitch(app_cfg, text="", variable=var_auto,
+                          onvalue=True, offvalue=False,
+                          button_color=PINK, button_hover_color="#e05577",
+                          progress_color=PINK, fg_color=BG3,
+                          command=lambda: _on_auto_toggle(var_auto.get()))
+sw_auto.grid(row=3, column=1, sticky="e", pady=4)
+
+# ── Row 4: Sound Pack ──
+ctk.CTkLabel(app_cfg, text="Sound Pack", font=(F, 10),
+             text_color=MUTED).grid(row=4, column=0, sticky="w", pady=4)
+pack_labels = [SOUND_PACKS[k]["label"] for k in SOUND_PACKS]
+pack_keys = list(SOUND_PACKS.keys())
+combo_pack = ctk.CTkOptionMenu(app_cfg, values=pack_labels,
+                                font=(FM, 9), fg_color=BG2,
+                                button_color=CYAN_DIM, button_hover_color=CYAN_DIM,
+                                dropdown_fg_color=BG2, dropdown_hover_color=BG3,
+                                dropdown_text_color=TEXT, text_color=TEXT,
+                                width=100, height=26, corner_radius=R_SM,
+                                command=lambda v: _save_app_setting(
+                                    "sound_pack",
+                                    pack_keys[pack_labels.index(v)]))
+combo_pack.set(SOUND_PACKS[app_prefs["sound_pack"]]["label"])
+combo_pack.grid(row=4, column=1, sticky="e", pady=4)
+
+# ── Row 5: Test Sound Button ──
+btn_test = ctk.CTkButton(app_cfg, text="🔊 Test Sound", font=(FM, 9),
+                           fg_color=BG2, hover_color=BG3, text_color=CYAN,
+                           height=26, corner_radius=R_SM,
+                           border_width=1, border_color=LINE,
+                           command=lambda: chime_async("complete"))
+btn_test.grid(row=5, column=0, columnspan=2, pady=(6, 4), sticky="ew")
+
+# ── Row 6: Info text ──
+lbl_app_info = ctk.CTkLabel(app_cfg, text="Settings saved to ~/.zone-timer-config.json",
+                             font=(F, 8), text_color=MUTED)
+lbl_app_info.grid(row=6, column=0, columnspan=2, pady=(2, 4))
+
+app_cfg.columnconfigure(0, weight=1)
+
 
 # ══════════════════════════════════════════════════════════════
 # COMPACT / FULL MODE TOGGLE (main window)
@@ -499,13 +768,15 @@ def toggle_compact():
         btn_mode.configure(text="▾")
         sec_log._collapse()
         sec_overlay._collapse()
+        sec_app._collapse()
         app.after(50, lambda: app.geometry("360x520"))
     else:
         expandable_frame.pack(padx=16, pady=(4, 12), fill="x", after=btn_ov)
         sec_log.frame.pack(fill="x", pady=3)
         sec_overlay.frame.pack(fill="x", pady=3)
+        sec_app.frame.pack(fill="x", pady=3)
         btn_mode.configure(text="▴")
-        app.after(50, lambda: app.geometry("380x620"))
+        app.after(50, lambda: app.geometry("380x680"))
 
 btn_mode.configure(command=toggle_compact)
 
@@ -1109,6 +1380,9 @@ def _poll_once():
 
 def _on_poll_result(data):
     if data and not data.get("error") and not data.get("guest"):
+        # ── Capture previous state for change detection ──
+        prev = dict(_prev_poll_state)
+
         server_state["session"] = data.get("session", {})
         server_state["zones"] = data.get("zones", [])
         if not server_state.get("connected"):
@@ -1116,6 +1390,10 @@ def _on_poll_result(data):
             login_frame.pack_forget()
             timer_frame.pack(fill="both", expand=True)
             lbl_user.configure(text=f"Logged in as {api.username}")
+
+        # Detect state changes → fire notifications + sounds
+        _detect_state_changes()
+
         refresh_from_server()
     elif data and data.get("error") == "unauthorized":
         server_state["connected"] = False
@@ -1123,6 +1401,39 @@ def _on_poll_result(data):
         add_log("Session expired — reconnect")
         lbl_conn.configure(text="●", text_color=RED)
     app.after(2000, _poll_once)
+
+
+def _detect_state_changes():
+    """Compare current vs previous poll state, fire notifications on transitions."""
+    d = get_session_data()
+    prev = _prev_poll_state
+
+    # Focus just completed (block_complete just turned true)
+    if d["block_complete"] and not prev.get("block_complete"):
+        zone = d["zone_title"]
+        chime_async("complete")
+        _system_notify("Focus Complete! 🎯", f"{zone} — time to take a break!")
+        _show_toast(f"✓ {zone} focus done — take a break!", GREEN)
+
+    # Day just completed
+    if d["day_complete"] and not prev.get("day_complete"):
+        chime_async("complete")
+        _system_notify("Day Complete! 🌟", "All zones finished — amazing work!")
+        _show_toast("🌟 ALL ZONES COMPLETE — amazing work!", GREEN, 6000)
+
+    # Break just started (block_type changed to 'break')
+    if d["block_type"] == "break" and prev.get("block_type") != "break":
+        if not d["block_complete"]:  # not during overtime → actual break start
+            chime_async("breakstart")
+            _show_toast("☕ Break started — relax!", AMBER)
+
+    # Zone just advanced (zone_idx changed)
+    if d["zone_idx"] != prev.get("zone_idx") and prev.get("zone_idx") is not None:
+        chime_async("transition")
+        _show_toast(f"▶ Zone {d['zone_idx']+1}: {d['zone_title']}", CYAN)
+
+    # Save current state for next comparison
+    _prev_poll_state.update(d)
 
 def _on_poll_error(err):
     add_log(f"Poll error: {err}")
