@@ -1096,16 +1096,39 @@ def refresh_from_server():
         fg = GREEN
     status = "RUNNING" if d["running"] else ("OVERTIME" if d["block_complete"] else "PAUSED")
 
+    is_overtime = d["block_complete"] and d["overtime"] > 0
+
     # Main window
     lbl_zone_name.configure(text=d["zone_title"], text_color=fg)
     lbl_zone_sub.configure(text=f"Zone {d['zone_idx'] + 1}/{d['total_zones']}  ·  {d['focus_dur']}min")
-    lbl_time.configure(text=fmt_time(d["remaining"]), text_color=fg)
-    lbl_status.configure(text=f"{label}  ·  Cycle {d['cycle'] + 1}  ·  {status}", text_color=fg)
-    pbar.configure(progress_color=fg)
-    if d["total"] > 0:
-        pbar.set(max(0, d["remaining"] / d["total"]))
+
+    if is_overtime:
+        # Show overtime with + prefix and red color
+        ot_sec = int(d["overtime"])
+        # Also compute live OT from last_tick if running
+        if d["running"]:
+            session = server_state.get("session", {})
+            by_zone = session.get("byZone", {})
+            zs = by_zone.get(str(d["zone_idx"]), {})
+            last_tick = zs.get("lastTick")
+            if last_tick:
+                try:
+                    live_ms = (_time.time() * 1000) - float(last_tick)
+                    ot_sec += max(0, int(live_ms / 1000))
+                except (TypeError, ValueError):
+                    pass
+        lbl_time.configure(text=f"+{fmt_time(ot_sec)}", text_color=RED)
+        lbl_status.configure(text=f"{label}  ·  Cycle {d['cycle'] + 1}  ·  OVERTIME", text_color=RED)
+        pbar.configure(progress_color=RED)
+        pbar.set(0)  # no progress in overtime
     else:
-        pbar.set(0)
+        lbl_time.configure(text=fmt_time(d["remaining"]), text_color=fg)
+        lbl_status.configure(text=f"{label}  ·  Cycle {d['cycle'] + 1}  ·  {status}", text_color=fg)
+        pbar.configure(progress_color=fg)
+        if d["total"] > 0:
+            pbar.set(max(0, d["remaining"] / d["total"]))
+        else:
+            pbar.set(0)
 
     # Toggle button state
     if d["running"]:
@@ -1126,7 +1149,10 @@ def refresh_from_server():
         lbl_conn.configure(text="●", text_color=RED)
 
     # Window title
-    if d["remaining"] > 0:
+    if is_overtime:
+        ot_sec = int(d["overtime"])
+        app.title(f"+{fmt_time(ot_sec)} OVERTIME — {d['zone_title']}")
+    elif d["remaining"] > 0:
         app.title(f"{fmt_time(d['remaining'])} — {d['zone_title']}")
     else:
         app.title("Zone Timer")

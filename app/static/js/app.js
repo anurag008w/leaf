@@ -578,18 +578,20 @@ const ZoneApp = (() => {
   }
 
   // ─── Sound ───────────────────────────────────
-  function beep(freq = 880, dur = 140, delay = 0, vol = 0.05) {
+  function beep(freq = 880, dur = 140, delay = 0, vol = 0.12) {
     try {
       if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = state.audioCtx;
       // Resume suspended context (browser autoplay policy blocks audio outside user gesture)
       if (ctx.state === 'suspended') ctx.resume();
       setTimeout(() => {
-        const osc = ctx.createOscillator(), gain = ctx.createGain();
-        osc.frequency.value = freq; osc.type = 'sine';
-        gain.gain.value = vol;
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.start(); osc.stop(ctx.currentTime + dur/1000);
+        try {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.frequency.value = freq; osc.type = 'sine';
+          gain.gain.value = vol;
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.start(); osc.stop(ctx.currentTime + dur/1000);
+        } catch {}
       }, delay);
     } catch {}
   }
@@ -662,7 +664,7 @@ const ZoneApp = (() => {
 
   function notifSend(title, body) {
     if (!state.settings.notifEnabled || state.settings.quietMode) return;
-    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+    if ('Notification' in window && Notification.permission === 'granted') {
       try { new Notification(title, { body }); } catch {}
     }
   }
@@ -999,6 +1001,7 @@ const ZoneApp = (() => {
           }
         }
         toast(`Time limit reached for "${z.title}" — auto-completing`, 'warning');
+        notifSend('Time Limit Reached!', `"${z.title}" auto-completing.`);
         completeZone();
         return;
       }
@@ -1031,6 +1034,8 @@ const ZoneApp = (() => {
         state.stats.history[key].focusMin += actualMin;
         state.stats.history[key].sessions++;
       }
+      chime('complete');
+      notifSend('Time Limit Reached!', `"${z.title}" auto-completing.`);
       toast(`Time limit reached for "${z.title}" — auto-completing`, 'warning');
       completeZone();
       return;
@@ -1265,6 +1270,7 @@ const ZoneApp = (() => {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
     logEvent('zone_complete', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
+    chime('complete');
     if (z) toast(`Zone ${z.title} complete! 🎉`, 'success');
     stopTimer();
     if (zs) { zs.running = false; zs.completed = true; zs.blockComplete = false; zs.overtimeSeconds = 0; }
@@ -1334,6 +1340,7 @@ const ZoneApp = (() => {
     stopTimer();
     saveState();
     confetti();
+    chime('complete');
     notifSend('Day Complete! 🌟', 'All zones finished!');
     toast('All zones complete! Amazing work! 🌟', 'success', 5000);
     renderAll();
@@ -1954,7 +1961,7 @@ const ZoneApp = (() => {
     const area = document.getElementById('timerArea');
     if (!area || !z || !zs) return;
 
-    const color = zs.blockType === 'break' ? 'var(--accent-break)' : z.color;
+    const color = zs.blockComplete ? '#F26B6B' : (zs.blockType === 'break' ? 'var(--accent-break)' : z.color);
     const total = zs.total || 1;
     const frac = (zs.completed || zs.blockComplete) ? 1 : (total - zs.remaining) / total;
     const cycles = z.totalCycles || 3;
