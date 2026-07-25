@@ -345,10 +345,8 @@ def mk_btn(parent, text, fg, cmd, is_primary=False):
                           border_width=1, border_color=LINE,
                           height=32, corner_radius=R_BTN, command=cmd)
 
-btns["start"] = mk_btn(ctrl, "START", CYAN, lambda: send_control("start"), True)
-btns["start"].grid(row=0, column=0, sticky="ew", padx=(8, 3), pady=(8, 3))
-btns["pause"] = mk_btn(ctrl, "PAUSE", CYAN, lambda: send_control("pause"))
-btns["pause"].grid(row=0, column=1, sticky="ew", padx=(3, 8), pady=(8, 3))
+btns["toggle"] = mk_btn(ctrl, "▶ START", CYAN, lambda: _toggle_start_pause(), True)
+btns["toggle"].grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 3))
 btns["skip"] = mk_btn(ctrl, "SKIP", CYAN, lambda: send_control("skip"))
 btns["skip"].grid(row=1, column=0, sticky="ew", padx=(8, 3), pady=(3, 8))
 btns["stop"] = mk_btn(ctrl, "RESET", RED, lambda: send_control("stop"))
@@ -1108,6 +1106,14 @@ def refresh_from_server():
         pbar.set(max(0, d["remaining"] / d["total"]))
     else:
         pbar.set(0)
+
+    # Toggle button state
+    if d["running"]:
+        btns["toggle"].configure(text="⏸  PAUSE", fg_color="#1a1520", text_color=TEXT,
+                                 hover_color="#2a1d30", border_color="#3a2a50")
+    else:
+        btns["toggle"].configure(text="▶  START", fg_color=CYAN, text_color=BG,
+                                 hover_color="#2ba8dd", border_color=LINE)
 
     # Overlay — redraw ring
     if overlay_visible:
