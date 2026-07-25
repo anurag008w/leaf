@@ -1046,6 +1046,7 @@ const ZoneApp = (() => {
     const zs = getCurrentZs();
     if (!zs || zs.completed) return;
     notifRequest();
+    _lastLocalTimerAction = Date.now();
     zs.running = true;
     zs.lastTick = Date.now();
     logEvent('session_start', { zoneIdx: state.currentZoneIdx, blockType: zs.blockType, cycle: zs.cycle });
@@ -1060,6 +1061,7 @@ const ZoneApp = (() => {
   function timerPause() {
     const zs = getCurrentZs();
     if (!zs) return;
+    _lastLocalTimerAction = Date.now();
     zs.running = false;
     logEvent('pause', { zoneIdx: state.currentZoneIdx, remaining: zs.remaining });
     stopTimer();
@@ -1072,6 +1074,7 @@ const ZoneApp = (() => {
     const zs = getCurrentZs();
     if (!z || !zs) return;
     if (!confirm(`Reset timer for ${z.title}?`)) return;
+    _lastLocalTimerAction = Date.now();
     stopTimer();
     zs.running = false;
     zs.blockComplete = false;
@@ -1091,6 +1094,7 @@ const ZoneApp = (() => {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
     if (!z || !zs) return;
+    _lastLocalTimerAction = Date.now();
 
     const dur = z.focusDuration || 25;
 
@@ -1142,6 +1146,7 @@ const ZoneApp = (() => {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
     if (!z) return;
+    _lastLocalTimerAction = Date.now();
 
     if (!confirm(`Skip zone "${z.title}"?`)) return;
 
@@ -1163,6 +1168,7 @@ const ZoneApp = (() => {
     const z = getZone(state.currentZoneIdx);
     const zs = getCurrentZs();
     if (!z || !zs) return;
+    _lastLocalTimerAction = Date.now();
 
     const overtimeSec = zs.overtimeSeconds || 0;
     if (overtimeSec > 0) {
@@ -5193,6 +5199,8 @@ const ZoneApp = (() => {
   // ─── Server timer sync (desktop overlay) ─────
   let _lastSeenControlTs = 0;
   let _serverPollHandle = null;
+  // Track when user last started/paused/resumed so poll doesn't kill local state
+  let _lastLocalTimerAction = 0;
 
   async function _pollTimerState() {
     if (isGuest()) return;
@@ -5208,10 +5216,13 @@ const ZoneApp = (() => {
         _applyServerControl(lc.action, serverSession);
       }
 
-      // 2. Always reconcile running state with server
+      // 2. Reconcile running state with server — but NOT if user just acted locally
+      //    (HTTP save takes ~5s, poll runs every 3s — without this grace period the
+      //     poll kills the timer before the server has the updated state)
+      const localGracePeriod = Date.now() - _lastLocalTimerAction < 7000;
       const zs = getCurrentZs();
       const sZs = (serverSession.byZone || {})[String(state.currentZoneIdx)];
-      if (sZs && zs) {
+      if (sZs && zs && !localGracePeriod) {
         // If server says running but browser isn't — start the interval
         if (sZs.running && !state.timerHandle && zs.remaining > 0) {
           zs.running = true;
