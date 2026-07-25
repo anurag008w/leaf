@@ -6,9 +6,6 @@
 # HOW TO RUN:
 #   1. Open a terminal in this folder
 #   2. Run:  bash ZoneTimer.sh
-#
-# (Double-click won't work on most Linux desktops —
-#  .sh files open in text editor by default)
 
 cd "$(dirname "$0")"
 
@@ -62,10 +59,21 @@ fi
 # ── Download timer.py if missing ──
 if [ ! -f "timer.py" ]; then
     echo "  [*] Downloading timer app from $SERVER_URL..."
-    python3 -c "import urllib.request; urllib.request.urlretrieve('$SERVER_URL/api/desktop/app', 'timer.py')"
-    if [ $? -ne 0 ]; then
+    echo "  [*] (First download may take up to 60s if server is sleeping)"
+    # Use curl with timeout — faster and shows progress
+    if command -v curl &> /dev/null; then
+        curl -sL --connect-timeout 30 --max-time 120 -o timer.py "$SERVER_URL/api/desktop/app"
+    else
+        python3 -c "
+import urllib.request, socket
+socket.setdefaulttimeout(60)
+urllib.request.urlretrieve('$SERVER_URL/api/desktop/app', 'timer.py')
+"
+    fi
+    if [ ! -s "timer.py" ]; then
         echo "  [!] Download failed. Check URL and internet."
         echo "  [!] Delete server.txt and try again."
+        rm -f timer.py
         exit 1
     fi
     chmod +x timer.py

@@ -42,7 +42,6 @@ if %ERRORLEVEL% neq 0 (
 set SERVER_URL=
 if exist "server.txt" (
     set /p SERVER_URL=<server.txt
-    :: trim whitespace
     for /f "tokens=*" %%a in ("!SERVER_URL!") do set SERVER_URL=%%a
 )
 if "!SERVER_URL!"=="" (
@@ -61,10 +60,18 @@ if "!SERVER_URL!"=="" (
 :: ── Download timer.py if missing ──
 if not exist "timer.py" (
     echo  [*] Downloading timer app from !SERVER_URL!...
-    python -c "import urllib.request; urllib.request.urlretrieve('!SERVER_URL!/api/desktop/app', 'timer.py')"
+    echo  [*] (First download may take up to 60s if server is sleeping)
+    python -c "import urllib.request, socket; socket.setdefaulttimeout(60); urllib.request.urlretrieve('!SERVER_URL!/api/desktop/app', 'timer.py')"
     if %ERRORLEVEL% neq 0 (
-        echo  [!] Download failed. Check URL and internet connection.
+        echo  [!] Download failed. Check URL and internet.
         echo  [!] Delete server.txt and try again.
+        pause
+        exit /b 1
+    )
+    :: Check file is not empty
+    for %%A in (timer.py) do if %%~zA==0 (
+        echo  [!] Downloaded file is empty. Server may be down.
+        del timer.py
         pause
         exit /b 1
     )
