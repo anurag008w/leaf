@@ -462,7 +462,7 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status", "/api/sync-screen", "/api/sync-screen/push", "/api/sync-screen/pull"}
+    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status", "/api/sync-screen", "/api/sync-screen/push", "/api/sync-screen/pull", "/api/desktop/app", "/api/desktop/launcher/windows", "/api/desktop/launcher/linux"}
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
@@ -937,6 +937,36 @@ async def timer_control(body: TimerControlBody, request: Request):
     write_user_data(uname, "session", session)
     log.info("timer control from desktop: %s by %s", body.action, uname)
     return {"status": "ok", "session": session}
+
+# ── Desktop app download ─────────────────────────────────
+_DESKTOP_DIR = _APP_DIR / "desktop"
+
+@app.get("/api/desktop/app")
+async def download_desktop_app():
+    """Download the Zone Timer desktop app (timer.py with auto-install bootstrap)."""
+    fp = _DESKTOP_DIR / "timer.py"
+    if not fp.exists():
+        raise HTTPException(404, "Desktop app not found")
+    return FileResponse(str(fp), media_type="text/x-python",
+                        filename="zone_timer.py",
+                        headers={"Content-Disposition": 'attachment; filename="zone_timer.py"'})
+
+@app.get("/api/desktop/launcher/{platform}")
+async def download_desktop_launcher(platform: str):
+    """Download launcher script. platform: 'windows' or 'linux'."""
+    if platform == "windows":
+        fp = _DESKTOP_DIR / "ZoneTimer.bat"
+        fn = "ZoneTimer.bat"
+    elif platform in ("linux", "mac"):
+        fp = _DESKTOP_DIR / "ZoneTimer.sh"
+        fn = "ZoneTimer.sh"
+    else:
+        raise HTTPException(400, "Use 'windows' or 'linux'")
+    if not fp.exists():
+        raise HTTPException(404, "Launcher not found")
+    ct = "text/plain" if platform == "windows" else "text/x-shellscript"
+    return FileResponse(str(fp), media_type=ct, filename=fn,
+                        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 # ── Backup / sync ─────────────────────────────────
 @app.post("/api/sync/trigger")

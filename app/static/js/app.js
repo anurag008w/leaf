@@ -3638,6 +3638,7 @@ const ZoneApp = (() => {
       { id: 'schedule', icon: '📚', label: 'Study Schedule' },
       { id: 'backup', icon: '☁️', label: 'Backup & Sync', show: state.isAdmin },
       { id: 'data', icon: '📦', label: 'Data' },
+      { id: 'desktop', icon: '🖥️', label: 'Desktop App' },
       { id: 'danger', icon: '⚠️', label: 'Danger Zone' },
     ];
     if (state.isAdmin) sections.push({ id: 'admin', icon: '🔑', label: 'Admin' });
@@ -3815,6 +3816,74 @@ const ZoneApp = (() => {
                 <button class="ctl" onclick="ZoneApp.syncExport()" style="padding:8px 16px;font-size:11px">📦 Full Backup</button>
                 <button class="ctl" onclick="ZoneApp.syncImport()" style="padding:8px 16px;font-size:11px">📥 Restore Backup</button>
                 <button class="ctl" onclick="ZoneApp.clearStats()" style="padding:8px 16px;font-size:11px">🗑 Clear Stats</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Desktop App -->
+          <div class="stg-section ${(state.activeStgSection || 'account') === 'desktop' ? 'active' : ''}" id="stg-desktop">
+            <div class="stg-card">
+              <div class="stg-card-title">🖥️ Desktop Floating Timer</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">
+                A floating always-on-top timer overlay for your desktop. <br>
+                Shows zone progress, cycle info, and control buttons — all in a tiny draggable ring that fades when idle.
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <!-- Windows -->
+                <div style="background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:16px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                    <span style="font-size:22px">🪟</span>
+                    <div>
+                      <div style="font-size:13px;font-weight:700;color:var(--text-primary)">Windows</div>
+                      <div style="font-size:11px;color:var(--text-muted)">Windows 10/11 with Python 3.10+</div>
+                    </div>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
+                    <b style="color:var(--text-primary)">Double-click setup:</b> Download <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">ZoneTimer.bat</code> → double-click it → deps auto-install → app launches!
+                  </div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <a href="/api/desktop/launcher/windows" download class="ctl primary" style="padding:8px 16px;font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">📥 Download Launcher (.bat)</a>
+                    <a href="/api/desktop/app" download class="ctl" style="padding:8px 16px;font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">📄 Just timer.py</a>
+                  </div>
+                </div>
+                <!-- Linux / Mac -->
+                <div style="background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:16px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                    <span style="font-size:22px">🐧</span>
+                    <div>
+                      <div style="font-size:13px;font-weight:700;color:var(--text-primary)">Linux / macOS</div>
+                      <div style="font-size:11px;color:var(--text-muted)">Any system with Python 3.10+</div>
+                    </div>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
+                    <b style="color:var(--text-primary)">Quick start:</b> Download <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">ZoneTimer.sh</code> → <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">chmod +x ZoneTimer.sh && ./ZoneTimer.sh</code>
+                  </div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <a href="/api/desktop/launcher/linux" download class="ctl primary" style="padding:8px 16px;font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">📥 Download Launcher (.sh)</a>
+                    <a href="/api/desktop/app" download class="ctl" style="padding:8px 16px;font-size:11px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">📄 Just timer.py</a>
+                  </div>
+                </div>
+                <!-- Features -->
+                <div style="background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:16px">
+                  <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:10px">✨ Features</div>
+                  <div style="font-size:11px;color:var(--text-muted);line-height:1.8">
+                    • Floating ring timer — always on top, draggable<br>
+                    • 3 overlay modes: Full / Compact / Ghost<br>
+                    • Auto-fade to transparent when idle<br>
+                    • Start / Pause / Skip / Reset from desktop<br>
+                    • Syncs with your web session in real-time<br>
+                    • Custom dark hacker terminal aesthetic
+                  </div>
+                </div>
+                <!-- Prerequisites -->
+                <div style="background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:16px">
+                  <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:10px">📋 Prerequisites</div>
+                  <div style="font-size:11px;color:var(--text-muted);line-height:1.8">
+                    • <a href="https://python.org/downloads/" target="_blank" style="color:var(--accent-lecture);text-decoration:underline">Python 3.10+</a> installed<br>
+                    • <code style="background:var(--bg-2);padding:1px 5px;border-radius:4px;font-family:var(--mono)">customtkinter</code> (auto-installed on first run)<br>
+                    • Internet connection (to sync with server)
+                  </div>
+                </div>
               </div>
             </div>
           </div>
