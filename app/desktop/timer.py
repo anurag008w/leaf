@@ -196,6 +196,7 @@ app.geometry("360x520")
 app.configure(fg_color=BG)
 app.resizable(False, False)
 
+saved = load_saved_config()
 api = ZoneAPI(saved.get("url", ""))
 
 server_state = {
@@ -228,8 +229,6 @@ ctk.CTkLabel(login_frame, text="TIMER", font=(FM, 10),
              text_color=MUTED).pack(pady=(0, 2))
 ctk.CTkLabel(login_frame, text="Connect to your Zone OS",
              font=(F, 10), text_color=MUTED).pack(pady=(0, 16))
-
-saved = load_saved_config()
 
 for label_text, default_val, key in [
     ("Server", "", "url"),
@@ -511,31 +510,38 @@ _PILL_W, _PILL_H   = 110, 42      # shrunk pill mode (window)
 _RING_R            = 68           # ring radius
 _RING_W            = 6            # ring stroke width
 
-# ── Create overlay window ──
-ov = ctk.CTkToplevel(app)
-ov.title("Zone")
-ov.overrideredirect(True)
-ov.attributes("-topmost", True)
-ov.configure(fg_color="#0A0D13")
-ov.geometry(f"{_FULL_W}x{_FULL_H}+120+120")
-ov.withdraw()
+# ── Create overlay window (deferred to avoid Linux startup hang) ──
+ov = None
+ov_canvas = None
+ov_btns_frame = None
+_OV_CH_FULL = 190
+_OV_CH_PILL = 26
 
-try:
-    ov.attributes("-alpha", _current_alpha)
-except Exception:
-    pass
+def _init_overlay():
+    """Create overlay window AFTER main window is shown (avoids Linux hang)."""
+    global ov, ov_canvas, ov_btns_frame
+    if ov is not None:
+        return
+    ov = ctk.CTkToplevel(app)
+    ov.title("Zone")
+    ov.overrideredirect(True)
+    ov.attributes("-topmost", True)
+    ov.configure(fg_color="#0A0D13")
+    ov.geometry(f"{_FULL_W}x{_FULL_H}+120+120")
+    ov.withdraw()
 
-# ── Canvas (ring + text) ──
-_OV_CW = _FULL_W - 20    # canvas width = window - padding
-_OV_CH_FULL = 190         # canvas height in full mode
-_OV_CH_PILL = 26          # canvas height in pill mode
+    try:
+        ov.attributes("-alpha", _current_alpha)
+    except Exception:
+        pass
 
-ov_canvas = tk.Canvas(ov, highlightthickness=0, bg="#0A0D13",
-                       width=_OV_CH_FULL, height=_OV_CH_FULL)
-ov_canvas.pack(padx=10, pady=(10, 4), fill="both", expand=True)
+    # ── Canvas (ring + text) ──
+    ov_canvas = tk.Canvas(ov, highlightthickness=0, bg="#0A0D13",
+                           width=_OV_CH_FULL, height=_OV_CH_FULL)
+    ov_canvas.pack(padx=10, pady=(10, 4), fill="both", expand=True)
 
-# ── Controls frame (packed only in expanded mode) ──
-ov_btns_frame = ctk.CTkFrame(ov, fg_color="transparent")
+    # ── Controls frame (packed only in expanded mode) ──
+    ov_btns_frame = ctk.CTkFrame(ov, fg_color="transparent")
 
 def _mk_small_btn(parent, text, fg, cmd, hover_bg=BG3):
     return ctk.CTkButton(parent, text=text, font=(FM, 10),
@@ -804,6 +810,7 @@ def _ov_right_click(e):
 # ══════════════════════════════════════════════════════════════
 def toggle_overlay():
     global overlay_visible, _overlay_expanded
+    _init_overlay()  # create overlay on first use (not at startup)
     overlay_visible = not overlay_visible
     if overlay_visible:
         _overlay_expanded = True
