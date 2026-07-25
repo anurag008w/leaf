@@ -2003,41 +2003,12 @@ const ZoneApp = (() => {
 
     area.innerHTML = `
       <div class="timer-area">
-        <div class="timer-left">
-          <div class="ring-section">
-            <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
-              ${ringSVG(frac, color)}
-              <div class="ring-center">
-                <div class="ring-time mono" style="color:${color}">${ringTime}</div>
-                <div class="ring-label">${ringLabel}</div>
-              </div>
-            </div>
-          </div>
-          <div class="timer-extras">
-            <div class="focus-stats-bar">
-              ${(() => {
-                const today = todayKey();
-                const todayEv = (state.tracking.log || []).filter(e => e.date === today);
-                const sess = todayEv.filter(e => e.type === 'session_complete').length;
-                const mins = todayEv.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
-                const pauses = todayEv.filter(e => e.type === 'pause').length;
-                const skips = todayEv.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
-                return `
-                  <div class="focus-stat-pill"><span class="focus-stat-num blue">${sess}</span><span class="focus-stat-lbl">Sessions</span></div>
-                  <div class="focus-stat-pill"><span class="focus-stat-num">${mins}m</span><span class="focus-stat-lbl">Focus</span></div>
-                  <div class="focus-stat-pill"><span class="focus-stat-num amber">${pauses}</span><span class="focus-stat-lbl">Pauses</span></div>
-                  <div class="focus-stat-pill"><span class="focus-stat-num red">${skips}</span><span class="focus-stat-lbl">Skips</span></div>`;
-              })()}
-            </div>
-            <div class="ambient-panel">
-              ${['rain:🌧:Rain', 'lofi:🎵:Lo-fi', 'whitenoise:☁:Noise', 'cafe:☕:Café'].map(s => {
-                const [id, icon, label] = s.split(':');
-                return `<button class="ambient-btn ${_ambientActive === id ? 'active' : ''}" onclick="ZoneApp.toggleAmbient('${id}')">
-                  <span class="ambient-icon">${icon}</span>${label}
-                </button>`;
-              }).join('')}
-              <input type="range" class="ambient-volume" min="0" max="100" value="30"
-                oninput="ZoneApp.setAmbientVolume(this.value)" title="Volume">
+        <div class="ring-section">
+          <div class="ring-wrap ${zs.running ? 'running' : ''}" style="--zc:${color}">
+            ${ringSVG(frac, color)}
+            <div class="ring-center">
+              <div class="ring-time mono" style="color:${color}">${ringTime}</div>
+              <div class="ring-label">${ringLabel}</div>
             </div>
           </div>
         </div>
@@ -2047,6 +2018,33 @@ const ZoneApp = (() => {
             <span class="tl-hdr-dur">${z.focusDuration || 25}m focus · ${getBreakDur(z, zs.cycle)}m break</span>
           </div>
           <div class="tl-scroll">${tlHTML}</div>
+        </div>
+      </div>
+      <div class="timer-extras-row">
+        <div class="focus-stats-bar">
+          ${(() => {
+            const today = todayKey();
+            const todayEv = (state.tracking.log || []).filter(e => e.date === today);
+            const sess = todayEv.filter(e => e.type === 'session_complete').length;
+            const mins = todayEv.filter(e => e.type === 'session_complete').reduce((a, e) => a + (e.duration || 0), 0);
+            const pauses = todayEv.filter(e => e.type === 'pause').length;
+            const skips = todayEv.filter(e => e.type === 'skip_block' || e.type === 'skip_zone').length;
+            return `
+              <div class="focus-stat-pill"><span class="focus-stat-num blue">${sess}</span><span class="focus-stat-lbl">Sessions</span></div>
+              <div class="focus-stat-pill"><span class="focus-stat-num">${mins}m</span><span class="focus-stat-lbl">Focus</span></div>
+              <div class="focus-stat-pill"><span class="focus-stat-num amber">${pauses}</span><span class="focus-stat-lbl">Pauses</span></div>
+              <div class="focus-stat-pill"><span class="focus-stat-num red">${skips}</span><span class="focus-stat-lbl">Skips</span></div>`;
+          })()}
+        </div>
+        <div class="ambient-panel">
+          ${['rain:🌧:Rain', 'lofi:🎵:Lo-fi', 'whitenoise:☁:Noise', 'cafe:☕:Café'].map(s => {
+            const [id, icon, label] = s.split(':');
+            return `<button class="ambient-btn ${_ambientActive === id ? 'active' : ''}" onclick="ZoneApp.toggleAmbient('${id}')">
+              <span class="ambient-icon">${icon}</span>${label}
+            </button>`;
+          }).join('')}
+          <input type="range" class="ambient-volume" min="0" max="100" value="30"
+            oninput="ZoneApp.setAmbientVolume(this.value)" title="Volume">
         </div>
       </div>`;
   }

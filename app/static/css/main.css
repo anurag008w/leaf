@@ -370,6 +370,7 @@ body.fs-active .ring-time { font-size: min(68px, 16vw); }
 body.fs-active .ring-label { font-size: 13px; letter-spacing: 3.5px; margin-top: 10px; }
 body.fs-active .timer-area { justify-content: center; }
 body.fs-active .timer-extras { display: none; }
+body.fs-active .timer-extras-row { display: none; }
 body.fs-active .tl-section { display: none; }
 body.fs-active .zone-note { display: none; }
 body.fs-active .controls { gap: 14px; margin-top: 16px; }
@@ -446,11 +447,17 @@ body.fs-active .panel { max-width: 640px; padding: 32px 28px 40px; }
 /* ─── TIMER ─── */
 .timer-area {
   display: flex; gap: 32px; flex-wrap: wrap;
-  align-items: flex-start; justify-content: center; padding: 16px 0 24px;
+  align-items: flex-start; justify-content: center; padding: 12px 0 8px;
 }
 .timer-left { display: flex; flex-direction: column; align-items: center; gap: 16px; flex: 0 0 auto; }
 .ring-section { flex: 0 0 auto; }
 .timer-extras { display: flex; flex-direction: column; gap: 10px; width: 260px; }
+.timer-extras-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 8px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.timer-extras-row .focus-stats-bar { flex: 1 1 240px; }
+.timer-extras-row .ambient-panel { flex: 1 1 240px; }
 .ring-wrap {
   position: relative; width: 260px; height: 260px;
   background: var(--bg-2); border-radius: 50%;
@@ -490,7 +497,7 @@ body.fs-active .panel { max-width: 640px; padding: 32px 28px 40px; }
 .tl-hdr-dur { opacity: 0.5; font-size: 9px; }
 .tl-scroll {
   display: flex; flex-direction: column; gap: 8px;
-  max-height: 340px; overflow-y: auto; padding-right: 6px;
+  max-height: 260px; overflow-y: auto; padding-right: 6px;
 }
 .tl-group { display: flex; align-items: stretch; gap: 6px; }
 .tl-block {
