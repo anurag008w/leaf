@@ -514,12 +514,16 @@ _RING_W            = 6            # ring stroke width
 ov = None
 ov_canvas = None
 ov_btns_frame = None
+ov_b_toggle = None
+ov_b_skip = None
+ov_b_stop = None
 _OV_CH_FULL = 190
 _OV_CH_PILL = 26
 
 def _init_overlay():
     """Create overlay window AFTER main window is shown (avoids Linux hang)."""
     global ov, ov_canvas, ov_btns_frame
+    global ov_b_toggle, ov_b_skip, ov_b_stop
     if ov is not None:
         return
     ov = ctk.CTkToplevel(app)
@@ -543,20 +547,19 @@ def _init_overlay():
     # ── Controls frame (packed only in expanded mode) ──
     ov_btns_frame = ctk.CTkFrame(ov, fg_color="transparent")
 
+    # ── Overlay control buttons (must be created inside _init_overlay) ──
+    ov_b_toggle = _mk_small_btn(ov_btns_frame, "▶",  CYAN,     lambda: _toggle_start_pause(), "#0d1e2a")
+    ov_b_skip   = _mk_small_btn(ov_btns_frame, "⏭",  TEXT_SEC,  lambda: send_control("skip"))
+    ov_b_stop   = _mk_small_btn(ov_btns_frame, "↺",  RED,       lambda: send_control("stop"), "#200e12")
+    ov_b_toggle.pack(side="left", padx=4)
+    ov_b_skip.pack(side="left", padx=4)
+    ov_b_stop.pack(side="left", padx=4)
+
 def _mk_small_btn(parent, text, fg, cmd, hover_bg=BG3):
     return ctk.CTkButton(parent, text=text, font=(FM, 10),
                           fg_color="transparent", hover_color=hover_bg,
                           text_color=fg, width=30, height=22,
                           corner_radius=6, command=cmd)
-
-ov_b_start  = _mk_small_btn(ov_btns_frame, "▶",  CYAN,     lambda: send_control("start"), "#0d1e2a")
-ov_b_pause  = _mk_small_btn(ov_btns_frame, "⏸",  TEXT,      lambda: send_control("pause"))
-ov_b_skip   = _mk_small_btn(ov_btns_frame, "⏭",  TEXT_SEC,  lambda: send_control("skip"))
-ov_b_stop   = _mk_small_btn(ov_btns_frame, "↺",  RED,       lambda: send_control("stop"), "#200e12")
-ov_b_start.pack(side="left", padx=4)
-ov_b_pause.pack(side="left", padx=4)
-ov_b_skip.pack(side="left", padx=4)
-ov_b_stop.pack(side="left", padx=4)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -640,6 +643,15 @@ def _redraw():
 
     _draw_ring(progress, _ov_color, _ov_timer_text, _ov_label_text,
                _overlay_expanded, zone_txt)
+
+    # Update toggle button text/icon based on running state
+    if ov_b_toggle is not None:
+        if d["running"]:
+            ov_b_toggle.configure(text="⏸", fg_color="#1a1520",
+                                  hover_color="#2a1d30")
+        else:
+            ov_b_toggle.configure(text="▶", fg_color="#0d1e2a",
+                                  hover_color="#132a3a")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -999,6 +1011,14 @@ btn_logout.configure(command=do_logout)
 # ══════════════════════════════════════════════════════════════
 # CONTROL API
 # ══════════════════════════════════════════════════════════════
+def _toggle_start_pause():
+    """Single toggle button: sends start if paused, pause if running."""
+    d = get_session_data()
+    if d["running"]:
+        send_control("pause")
+    else:
+        send_control("start")
+
 def send_control(action):
     if not server_state["connected"]:
         add_log("Not connected")
