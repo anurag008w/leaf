@@ -6,8 +6,12 @@
 # HOW TO RUN:
 #   1. Open a terminal in this folder
 #   2. Run:  bash ZoneTimer.sh
+#
+# After first run, a "Zone Timer" shortcut will appear on your Desktop.
+# Double-click it anytime to launch!
 
 cd "$(dirname "$0")"
+APP_DIR="$(pwd)"
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
@@ -78,6 +82,31 @@ urllib.request.urlretrieve('$SERVER_URL/api/desktop/app', 'timer.py')
     fi
     chmod +x timer.py
     echo "  [+] Downloaded!"
+fi
+
+# ── Install .desktop shortcut (double-click launcher) ──
+DESKTOP_FILE="$HOME/Desktop/ZoneTimer.desktop"
+if [ ! -f "$DESKTOP_FILE" ]; then
+    echo "  [*] Installing desktop shortcut..."
+    cat > "$DESKTOP_FILE" << DESKTOP
+[Desktop Entry]
+Name=Zone Timer
+Comment=Floating desktop timer for Zone Study OS
+Exec=bash -c 'cd "$APP_DIR" && exec bash ZoneTimer.sh'
+Icon=preferences-system-time
+Terminal=true
+Type=Application
+Categories=Utility;Education;
+StartupNotify=false
+Keywords=timer;focus;study;zone;
+DESKTOP
+    chmod +x "$DESKTOP_FILE"
+    # Also try to add to app menu (non-critical, ignore errors)
+    APP_DIR_PATH="$HOME/.local/share/applications"
+    mkdir -p "$APP_DIR_PATH" 2>/dev/null
+    cp "$DESKTOP_FILE" "$APP_DIR_PATH/ZoneTimer.desktop" 2>/dev/null
+    update-desktop-database "$APP_DIR_PATH" 2>/dev/null
+    echo "  [+] Desktop shortcut installed! Double-click 'Zone Timer' on your Desktop."
 fi
 
 # ── Launch ──

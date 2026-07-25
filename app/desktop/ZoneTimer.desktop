@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Zone Timer
+Comment=Floating desktop timer for Zone Study OS
+Exec=bash -c 'cd "$HOME/Desktop/zone-timer" && exec bash ZoneTimer.sh'
+Icon=preferences-system-time
+Terminal=true
+Type=Application
+Categories=Utility;Education;
+StartupNotify=false
+Keywords=timer;focus;study;zone;
