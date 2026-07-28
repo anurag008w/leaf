@@ -3155,9 +3155,11 @@ const ZoneApp = (() => {
           <div class="heatmap-day-labels">
             ${dayLabels.map(l => `<span class="heatmap-day-label">${l}</span>`).join('')}
           </div>
-          <div style="flex:1;position:relative">
-            <div class="heatmap-months">${monthLabelHtml}</div>
-            <div class="heatmap-grid">${cells}</div>
+          <div style="flex:1;overflow-x:auto">
+            <div style="position:relative">
+              <div class="heatmap-months">${monthLabelHtml}</div>
+              <div class="heatmap-grid">${cells}</div>
+            </div>
           </div>
         </div>
         <div class="heatmap-legend">
