@@ -7,20 +7,26 @@
 .dia-wrap {
   display: grid;
   grid-template-columns: 280px 1fr 260px;
+  grid-template-rows: 1fr;
   gap: 0;
-  padding: 0 24px 80px;
+  padding: 0 24px 0;
   max-width: 1280px;
   margin: 0 auto;
-  min-height: calc(100vh - 160px);
+  height: calc(100vh - 160px);
 }
 @media (max-width: 1024px) {
   .dia-wrap { grid-template-columns: 240px 1fr; }
   .dia-sidebar { display: none; }
 }
 @media (max-width: 768px) {
-  .dia-wrap { grid-template-columns: 1fr; padding: 0 12px 60px; }
+  .dia-wrap {
+    grid-template-columns: 1fr;
+    padding: 0 12px 0;
+    height: auto;
+    min-height: calc(100vh - 160px);
+  }
   .dia-entry-list { max-height: 200px; }
-  .dia-editor, .dia-viewer { min-height: calc(100vh - 220px); }
+  .dia-editor, .dia-viewer { min-height: calc(100vh - 220px); overflow-y: auto; }
 }
 
 /* ── Entry List (Timeline) ──────────────────────────────── */
@@ -28,6 +34,7 @@
   background: var(--bg-1);
   border-right: 1px solid var(--line-soft);
   overflow: hidden;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -239,7 +246,8 @@
   background: var(--bg-1);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
 }
 .dia-vw-top {
   padding: 16px 28px 12px;
@@ -529,7 +537,8 @@ h4.dia-md-h { font-size: 16px; }
   background: var(--bg-1);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
 }
 .dia-ed-top {
   padding: 14px 24px 10px;
