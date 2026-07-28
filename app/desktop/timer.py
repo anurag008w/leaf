@@ -1223,16 +1223,30 @@ def get_session_data() -> dict:
     zones = server_state.get("zones", [])
     zone_cfg = zones[idx] if idx < len(zones) else {}
 
-    remaining = zs.get("remaining", 0)
+    server_remaining = zs.get("remaining", 0)
     total = zs.get("total", 1500)
     running = zs.get("running", False)
     last_tick = zs.get("lastTick")
+    block_complete = zs.get("blockComplete", False)
+    server_overtime = zs.get("overtimeSeconds", 0)
+
+    remaining = server_remaining
+    overtime = server_overtime
 
     if running and last_tick:
         try:
             elapsed_ms = (_time.time() * 1000) - float(last_tick)
             elapsed_sec = max(0, elapsed_ms / 1000)
-            remaining = max(0, remaining - elapsed_sec)
+            remaining = max(0, server_remaining - elapsed_sec)
+
+            # Detect overtime: either blockComplete is set by web app,
+            # OR remaining has hit 0 locally (desktop-only mode)
+            if remaining <= 0 and elapsed_sec > server_remaining:
+                overtime = int(elapsed_sec - server_remaining)
+                block_complete = True  # treat as complete locally
+            elif block_complete:
+                # blockComplete was already set — compute live overtime
+                overtime = server_overtime + int(elapsed_sec)
         except (TypeError, ValueError):
             pass
 
@@ -1242,8 +1256,8 @@ def get_session_data() -> dict:
         "running": running,
         "block_type": zs.get("blockType", "focus"),
         "cycle": zs.get("cycle", 0),
-        "block_complete": zs.get("blockComplete", False),
-        "overtime": zs.get("overtimeSeconds", 0),
+        "block_complete": block_complete,
+        "overtime": overtime,
         "zone_idx": idx,
         "total_zones": len(zones),
         "zone_title": zone_cfg.get("title", f"Zone {idx + 1}"),
@@ -1469,20 +1483,8 @@ def refresh_from_server():
         pbar.configure(progress_color=GREEN)
         pbar.set(1.0)
     elif d["block_complete"]:
-        # Show overtime with + prefix and red color
+        # Overtime: d["overtime"] is live-computed from lastTick in get_session_data()
         ot_sec = int(d["overtime"])
-        # Also compute live OT from last_tick if running
-        if d["running"]:
-            session = server_state.get("session", {})
-            by_zone = session.get("byZone", {})
-            zs = by_zone.get(str(d["zone_idx"]), {})
-            last_tick = zs.get("lastTick")
-            if last_tick:
-                try:
-                    live_ms = (_time.time() * 1000) - float(last_tick)
-                    ot_sec += max(0, int(live_ms / 1000))
-                except (TypeError, ValueError):
-                    pass
         lbl_time.configure(text=f"+{fmt_time(ot_sec)}", text_color=RED)
         lbl_status.configure(text=f"FOCUS  ·  Cycle {d['cycle'] + 1}  ·  TAKE BREAK", text_color=RED)
         pbar.configure(progress_color=RED)

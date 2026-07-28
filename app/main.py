@@ -915,17 +915,23 @@ async def timer_control(body: TimerControlBody, request: Request):
             # If in overtime, log it
             if zs.get("blockComplete") and zs.get("overtimeSeconds", 0) > 0:
                 zs["overtimeSeconds"] = 0
+            config = _read_json(user_dir(uname) / "config.json") or load_config()
+            zones_cfg = config.get("zones", [])
+            z_cfg = zones_cfg[idx] if idx < len(zones_cfg) else {}
             if zs.get("blockType") == "focus":
                 zs["blockType"] = "break"
-                zs["remaining"] = 5 * 60
-                zs["total"] = 5 * 60
+                # Use configured break duration, not hardcoded 5min
+                cycle = zs.get("cycle", 0)
+                long_every = z_cfg.get("cyclesBeforeLongBreak", 4)
+                if long_every > 0 and (cycle + 1) % long_every == 0:
+                    break_min = z_cfg.get("longBreakDuration", 15)
+                else:
+                    break_min = z_cfg.get("breakDuration", 5)
+                zs["remaining"] = break_min * 60
+                zs["total"] = break_min * 60
             else:
                 zs["cycle"] = zs.get("cycle", 0) + 1
                 zs["blockType"] = "focus"
-                # Reset to focus duration from config
-                config = _read_json(user_dir(uname) / "config.json") or load_config()
-                zones_cfg = config.get("zones", [])
-                z_cfg = zones_cfg[idx] if idx < len(zones_cfg) else {}
                 dur = (z_cfg.get("focusDuration", 25)) * 60
                 zs["remaining"] = dur
                 zs["total"] = dur
@@ -934,8 +940,11 @@ async def timer_control(body: TimerControlBody, request: Request):
             zs["overtimeSeconds"] = 0
             zs["lastTick"] = now * 1000
         elif body.action == "break":
-            # "Take Break" — transition from overtime/completed focus to break
-            if zs.get("blockComplete"):
+            # "Take Break" — transition from overtime/completed focus to break.
+            # Allow when blockComplete is True (web app set it) OR when
+            # remaining <= 0 (desktop detected overtime independently).
+            remaining_left = zs.get("remaining", 0)
+            if zs.get("blockComplete") or remaining_left <= 0:
                 zs["blockType"] = "break"
                 config = _read_json(user_dir(uname) / "config.json") or load_config()
                 zones_cfg = config.get("zones", [])
