@@ -992,9 +992,15 @@ async def timer_control(body: TimerControlBody, request: Request):
         elif body.action == "break":
             # "Take Break" — transition from overtime/completed focus to break.
             # Allow when blockComplete is True (web app set it) OR when
-            # remaining <= 0 (desktop detected overtime independently).
+            # the block has effectively finished (remaining - elapsed <= 0).
             remaining_left = zs.get("remaining", 0)
-            if zs.get("blockComplete") or remaining_left <= 0:
+            # Desktop computes remaining from lastTick locally; server's stored
+            # `remaining` is never ticked.  Recompute effective remaining:
+            effective_remaining = remaining_left
+            if zs.get("running") and zs.get("lastTick"):
+                elapsed_since_tick = now - (zs["lastTick"] / 1000)
+                effective_remaining = max(0, remaining_left - elapsed_since_tick)
+            if zs.get("blockComplete") or effective_remaining <= 0 or remaining_left <= 0:
                 zs["blockType"] = "break"
                 config = _read_json(user_dir(uname) / "config.json") or load_config()
                 zones_cfg = config.get("zones", [])

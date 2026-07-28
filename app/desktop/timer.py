@@ -915,14 +915,16 @@ def _redraw():
     d = get_session_data()
     remaining = d["remaining"]
     total = d["total"]
-    if d["day_complete"] or d["block_complete"]:
-        progress = 1.0  # full ring in overtime or day complete
+    if d["day_complete"] or d["block_complete"] or d.get("break_complete"):
+        progress = 1.0  # full ring in overtime / break-complete / day complete
     else:
         progress = (remaining / total) if total > 0 else 0
 
     # Color based on block type
     global _ov_color
     if d["day_complete"]:
+        _ov_color = GREEN
+    elif d.get("break_complete"):
         _ov_color = GREEN
     elif d["block_complete"]:
         _ov_color = RED
@@ -936,12 +938,17 @@ def _redraw():
     label = "FOCUS" if d["block_type"] == "focus" else "BREAK"
     if d["day_complete"]:
         label = "COMPLETE"
-    status = "RUNNING" if d["running"] else ("OVERTIME" if d["block_complete"] else "PAUSED")
+    elif d.get("break_complete"):
+        label = "NEXT"
+    status = "RUNNING" if d["running"] else ("OVERTIME" if d["block_complete"] else ("SWITCHING" if d.get("break_complete") else "PAUSED"))
 
     global _ov_timer_text, _ov_label_text
     if d["day_complete"]:
         _ov_timer_text = "✓ DONE"
         _ov_label_text = "ALL ZONES COMPLETE"
+    elif d.get("break_complete"):
+        _ov_timer_text = "✓ BREAK"
+        _ov_label_text = "SWITCHING TO FOCUS..."
     elif d["block_complete"]:
         ot_sec = int(d["overtime"])
         _ov_timer_text = f"+{fmt_time(ot_sec)}"
@@ -963,9 +970,9 @@ def _redraw():
             ov_b_toggle.configure(text="▶", fg_color="#0d1e2a",
                                   hover_color="#132a3a")
 
-    # Overlay skip button → "Take Break" when blockComplete
+    # Overlay skip button → "Take Break" when blockComplete (focus only)
     if ov_b_skip is not None:
-        if d["block_complete"]:
+        if d["block_complete"] and d["block_type"] == "focus":
             ov_b_skip.configure(text="☕", fg_color=AMBER, hover_color="#c27030",
                                 command=lambda: send_control("break"))
         else:
@@ -1215,7 +1222,10 @@ def fmt_time(seconds: int) -> str:
     m, s = divmod(max(0, int(seconds)), 60)
     return f"{m:02d}:{s:02d}"
 
+_break_autoskip_ts = 0  # timestamp of last auto-skip to avoid duplicates
+
 def get_session_data() -> dict:
+    global _break_autoskip_ts
     session = server_state.get("session", {})
     by_zone = session.get("byZone", {})
     idx = session.get("currentZoneIdx", 0)
@@ -1229,9 +1239,11 @@ def get_session_data() -> dict:
     last_tick = zs.get("lastTick")
     block_complete = zs.get("blockComplete", False)
     server_overtime = zs.get("overtimeSeconds", 0)
+    block_type = zs.get("blockType", "focus")
 
     remaining = server_remaining
     overtime = server_overtime
+    break_complete = False
 
     if running and last_tick:
         try:
@@ -1239,9 +1251,15 @@ def get_session_data() -> dict:
             elapsed_sec = max(0, elapsed_ms / 1000)
             remaining = max(0, server_remaining - elapsed_sec)
 
-            # Detect overtime: either blockComplete is set by web app,
-            # OR remaining has hit 0 locally (desktop-only mode)
-            if remaining <= 0 and elapsed_sec > server_remaining:
+            if block_type == "break" and remaining <= 0:
+                # Break timer finished — signal auto-transition (web app
+                # handles this via handleBlockComplete; desktop needs the
+                # server-side skip action).
+                break_complete = True
+                block_complete = False
+                overtime = 0
+            elif remaining <= 0 and elapsed_sec > server_remaining:
+                # Focus overtime: remaining hit 0 locally (desktop-only mode)
                 overtime = int(elapsed_sec - server_remaining)
                 block_complete = True  # treat as complete locally
             elif block_complete:
@@ -1250,13 +1268,22 @@ def get_session_data() -> dict:
         except (TypeError, ValueError):
             pass
 
+    # Auto-skip: when break finishes, tell server to transition to next focus
+    # (mirrors web app's handleBlockComplete → break→focus logic)
+    if break_complete and running:
+        now_ts = _time.time()
+        if now_ts - _break_autoskip_ts > 5:  # debounce: max once per 5s
+            _break_autoskip_ts = now_ts
+            send_control("skip")
+
     return {
         "remaining": remaining,
         "total": total,
         "running": running,
-        "block_type": zs.get("blockType", "focus"),
+        "block_type": block_type,
         "cycle": zs.get("cycle", 0),
         "block_complete": block_complete,
+        "break_complete": break_complete,
         "overtime": overtime,
         "zone_idx": idx,
         "total_zones": len(zones),
@@ -1366,7 +1393,7 @@ def _on_control_result(action, result):
         add_log(f"→ {action.upper()}")
         if result.get("session"):
             server_state["session"] = result["session"]
-            if action in ("pause", "stop", "break"):
+            if action in ("pause", "stop", "break", "skip"):
                 _touch_last_tick()
             refresh_from_server()
     else:
@@ -1437,9 +1464,14 @@ def _detect_state_changes():
 
     # Break just started (block_type changed to 'break')
     if d["block_type"] == "break" and prev.get("block_type") != "break":
-        if not d["block_complete"]:  # not during overtime → actual break start
+        if not d["block_complete"] and not d.get("break_complete"):  # not during overtime → actual break start
             chime_async("breakstart")
             _show_toast("☕ Break started — relax!", AMBER)
+
+    # Break just completed (break_complete just turned true)
+    if d.get("break_complete") and not prev.get("break_complete"):
+        chime_async("transition")
+        _show_toast("Break done! → Next focus", GREEN)
 
     # Zone just advanced (zone_idx changed)
     if d["zone_idx"] != prev.get("zone_idx") and prev.get("zone_idx") is not None:
@@ -1465,13 +1497,25 @@ def refresh_from_server():
     elif d["block_complete"]:
         fg = RED
         label = "FOCUS"
+    elif d["break_complete"]:
+        fg = GREEN
+        label = "NEXT"
     elif d["block_type"] == "focus":
         fg = CYAN
         label = "FOCUS"
     else:
         fg = AMBER
         label = "BREAK"
-    status = "DAY DONE" if d["day_complete"] else ("TAKE BREAK" if d["block_complete"] else ("RUNNING" if d["running"] else "PAUSED"))
+    if d["day_complete"]:
+        status = "DAY DONE"
+    elif d["break_complete"]:
+        status = "SWITCHING..."
+    elif d["block_complete"]:
+        status = "TAKE BREAK"
+    elif d["running"]:
+        status = "RUNNING"
+    else:
+        status = "PAUSED"
 
     # Main window
     lbl_zone_name.configure(text=d["zone_title"], text_color=fg)
@@ -1480,6 +1524,12 @@ def refresh_from_server():
     if d["day_complete"]:
         lbl_time.configure(text="✓", text_color=GREEN)
         lbl_status.configure(text="ALL ZONES COMPLETE", text_color=GREEN)
+        pbar.configure(progress_color=GREEN)
+        pbar.set(1.0)
+    elif d["break_complete"]:
+        # Break just finished — auto-skip in progress, show brief transition
+        lbl_time.configure(text="✓", text_color=GREEN)
+        lbl_status.configure(text=f"BREAK DONE  ·  Cycle {d['cycle'] + 1}  ·  SWITCHING...", text_color=GREEN)
         pbar.configure(progress_color=GREEN)
         pbar.set(1.0)
     elif d["block_complete"]:
@@ -1506,8 +1556,8 @@ def refresh_from_server():
         btns["toggle"].configure(text="▶  START", fg_color=CYAN, text_color=BG,
                                  hover_color="#2ba8dd", border_color=LINE)
 
-    # Take Break button — show when blockComplete, hide otherwise
-    if d["block_complete"]:
+    # Take Break button — show when blockComplete (focus overtime), hide otherwise
+    if d["block_complete"] and d["block_type"] == "focus":
         btns["break"].grid()
         btns["skip"].grid_remove()
     else:
@@ -1527,6 +1577,8 @@ def refresh_from_server():
     # Window title
     if d["day_complete"]:
         app.title("✓ Day Complete!")
+    elif d["break_complete"]:
+        app.title("Break done → switching — " + d["zone_title"])
     elif d["block_complete"]:
         ot_sec = int(d["overtime"])
         app.title(f"+{fmt_time(ot_sec)} TAKE BREAK — {d['zone_title']}")
