@@ -65,6 +65,7 @@ from app import github_sync
 _active_tokens = set()
 _token_users: dict[str, str] = {}
 _token_created: dict[str, float] = {}
+_token_last_seen: dict[str, float] = {}  # last API request timestamp per token
 COOKIE_NAME = "zone_session"
 config_cache = {"data": None, "mtime": 0}
 USERS_FILE = DATA_DIR / "users.json"
@@ -79,6 +80,7 @@ RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 10     # max attempts per window
 TOKEN_EXPIRY_SECONDS = 86400 * 7  # 7 days
 MAX_SESSIONS_TOTAL = 50           # global cap across all users
+ACTIVE_WINDOW_SECONDS = 120       # 2 min — user "active" if last request within this
 
 def rate_limit_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -102,6 +104,7 @@ def invalidate_user_sessions(username: str) -> None:
             _active_tokens.discard(token)
             del _token_users[token]
             _token_created.pop(token, None)
+            _token_last_seen.pop(token, None)
     save_sessions()
 
 def expire_stale_tokens() -> None:
@@ -111,6 +114,7 @@ def expire_stale_tokens() -> None:
         _active_tokens.discard(t)
         _token_users.pop(t, None)
         _token_created.pop(t, None)
+        _token_last_seen.pop(t, None)
 
 
 # ── Session persistence ────────────────────────────
@@ -124,10 +128,13 @@ def load_sessions() -> None:
             _token_users[token] = uname
         for token, created in saved.get("token_created", {}).items():
             _token_created[token] = created
+        for token, last in saved.get("token_last_seen", {}).items():
+            _token_last_seen[token] = last
         for token in saved.get("guest_tokens", []):
             _active_tokens.add(token)
             if token not in _token_created:
                 _token_created[token] = time.time()
+                _token_last_seen[token] = time.time()
         expire_stale_tokens()
         log.info("restored %d sessions", len(_active_tokens))
     except Exception as e:
@@ -142,6 +149,7 @@ def save_sessions() -> None:
             "token_users": _token_users,
             "token_created": _token_created,
             "guest_tokens": guest_tokens,
+            "token_last_seen": _token_last_seen,
         }))
         tmp.replace(SESSIONS_FILE)
     except Exception as e:
@@ -322,11 +330,13 @@ def make_session(username: str) -> str:
         _active_tokens.discard(oldest_token)
         _token_users.pop(oldest_token, None)
         _token_created.pop(oldest_token, None)
+        _token_last_seen.pop(oldest_token, None)
 
     token = secrets.token_hex(32)
     _active_tokens.add(token)
     _token_users[token] = username
     _token_created[token] = time.time()
+    _token_last_seen[token] = time.time()
 
     # Global cap to prevent unbounded growth
     if len(_active_tokens) > MAX_SESSIONS_TOTAL:
@@ -335,6 +345,7 @@ def make_session(username: str) -> str:
             _active_tokens.discard(old_token)
             _token_users.pop(old_token, None)
             _token_created.pop(old_token, None)
+            _token_last_seen.pop(old_token, None)
 
     save_sessions()
     return token
@@ -427,13 +438,22 @@ async def _sync_loop():
             log.warning("sync failed: %s", exc)
         await asyncio.sleep(SYNC_INTERVAL)
 
+def _has_active_users() -> bool:
+    """Check if any user made an API request in the last ACTIVE_WINDOW_SECONDS."""
+    now = time.time()
+    for token in _active_tokens:
+        last = _token_last_seen.get(token, 0)
+        if now - last < ACTIVE_WINDOW_SECONDS:
+            return True
+    return False
+
 async def _gh_sync_loop():
-    """Auto-push data to GitHub every 40 seconds (only if ≥1 user logged in + data changed)."""
+    """Auto-push data to GitHub every 40s (only if ≥1 user truly active + data changed)."""
     await asyncio.sleep(30)  # initial delay
     while True:
         try:
-            # Only sync when at least 1 user is logged in
-            if len(_active_tokens) > 0 and DATA_DIR.exists() and any(DATA_DIR.iterdir()):
+            # Only sync when at least 1 user made a request in the last 2 min
+            if _has_active_users() and DATA_DIR.exists() and any(DATA_DIR.iterdir()):
                 if github_sync.has_data_changed():
                     result = await asyncio.to_thread(github_sync.push_data)
                     if result.success:
@@ -443,8 +463,8 @@ async def _gh_sync_loop():
                         log.warning("GitHub auto-sync failed: %s", result.message)
                 else:
                     log.debug("GitHub auto-sync: no changes detected, skipping")
-            elif len(_active_tokens) == 0:
-                log.debug("GitHub auto-sync: no active users, skipping")
+            elif not _has_active_users():
+                log.debug("GitHub auto-sync: no active users (last %ds), skipping", ACTIVE_WINDOW_SECONDS)
         except Exception as exc:
             log.warning("GitHub auto-sync error: %s", exc)
         await asyncio.sleep(github_sync.GITHUB_SYNC_INTERVAL)
@@ -476,14 +496,17 @@ async def auth_middleware(request: Request, call_next):
             _active_tokens.discard(token)
             _token_users.pop(token, None)
             _token_created.pop(token, None)
+            _token_last_seen.pop(token, None)
             save_sessions()
             return JSONResponse({"error": "session expired"}, 401)
+        _token_last_seen[token] = time.time()  # track last activity
         request.state.token = token
         request.state.username = resolve_username(token)
         return await call_next(request)
     else:
         token = request.cookies.get(COOKIE_NAME, "")
         if token and token in _active_tokens:
+            _token_last_seen[token] = time.time()  # track last activity
             request.state.token = token
             request.state.username = resolve_username(token)
 
@@ -550,6 +573,7 @@ async def guest_login(request: Request):
     token = GUEST_PREFIX + secrets.token_hex(16)
     _active_tokens.add(token)
     _token_created[token] = time.time()
+    _token_last_seen[token] = time.time()
     save_sessions()
     resp = JSONResponse({"token": token, "guest": True})
     make_secure_cookie(resp, token)
@@ -561,6 +585,7 @@ async def logout(request: Request):
     _active_tokens.discard(token)
     _token_users.pop(token, None)
     _token_created.pop(token, None)
+    _token_last_seen.pop(token, None)
     save_sessions()
     resp = JSONResponse({"status": "ok"})
     resp.set_cookie(COOKIE_NAME, "", max_age=0)
@@ -714,6 +739,7 @@ async def health():
         "uptime": round(time.time() - _start_time),
         "users": len(load_users()),
         "active_sessions": len(_active_tokens),
+        "truly_active": sum(1 for t in _active_tokens if time.time() - _token_last_seen.get(t, 0) < ACTIVE_WINDOW_SECONDS),
         "timestamp": time.time(),
     }
 
