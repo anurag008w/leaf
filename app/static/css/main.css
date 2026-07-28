@@ -1404,7 +1404,7 @@ input[type=range]::-moz-range-progress {
   .exam-num { font-size: 30px; }
   .exam-card { padding: 20px 16px; }
 }
-#tabBody { animation: fadeIn 0.2s ease; max-width: 1200px; }
+#tabBody { animation: fadeIn 0.2s ease; width: 100%; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
