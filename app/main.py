@@ -428,11 +428,12 @@ async def _sync_loop():
         await asyncio.sleep(SYNC_INTERVAL)
 
 async def _gh_sync_loop():
-    """Auto-push data to GitHub every 40 seconds (only if data changed)."""
+    """Auto-push data to GitHub every 40 seconds (only if ≥1 user logged in + data changed)."""
     await asyncio.sleep(30)  # initial delay
     while True:
         try:
-            if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
+            # Only sync when at least 1 user is logged in
+            if len(_active_tokens) > 0 and DATA_DIR.exists() and any(DATA_DIR.iterdir()):
                 if github_sync.has_data_changed():
                     result = await asyncio.to_thread(github_sync.push_data)
                     if result.success:
@@ -442,6 +443,8 @@ async def _gh_sync_loop():
                         log.warning("GitHub auto-sync failed: %s", result.message)
                 else:
                     log.debug("GitHub auto-sync: no changes detected, skipping")
+            elif len(_active_tokens) == 0:
+                log.debug("GitHub auto-sync: no active users, skipping")
         except Exception as exc:
             log.warning("GitHub auto-sync error: %s", exc)
         await asyncio.sleep(github_sync.GITHUB_SYNC_INTERVAL)
