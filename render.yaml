@@ -23,7 +23,17 @@ services:
         value: "true"
       - key: GITHUB_SYNC_INTERVAL
         value: "300"
-      # Optional: set these for GitHub sync (recommended for free tier)
+      # ── Cron-job.org keepalive ──────────────────────────
+      - key: KEEPALIVE_ENABLED
+        value: "true"
+      - key: SPACE_HOST
+        value: "zone-study-os.onrender.com"
+      - key: KEEPALIVE_CRON
+        value: "*/10 * * * *"
+      # ── Set these via Render Dashboard → Environment ────
+      # CRONJOB_API_KEY — cron-job.org → Console → Settings → API → Generate Key
+      # CRON_TOKEN      — any random string, e.g. openssl rand -hex 16
+      # ── Optional: set these for GitHub sync ─────────────
       # - key: GH_TOKEN
       #   sync: false
       # Optional: set these for HF backup sync
