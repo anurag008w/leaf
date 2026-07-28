@@ -110,6 +110,9 @@
 
   function toggleViewMode() {
     _viewMode = !_viewMode;
+    // Clean up fullscreen if active
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', _fsEscHandler);
     renderDiaryTab();
   }
 
@@ -836,6 +839,9 @@
   function renderDiaryTab() {
     const body = document.getElementById('tabBody');
     if(!body) return;
+    // Clean up any fullscreen state on re-render
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', _fsEscHandler);
     const all = entries();
     const sel = _sel ? all.find(e=>e.id===_sel) : null;
 
@@ -895,7 +901,7 @@
       </div>
 
       <!-- CENTER: Editor / View -->
-      <div class="dia-editor">${edHtml}</div>
+      <div class="${_viewMode ? 'dia-viewer' : 'dia-editor'}">${edHtml}</div>
 
       <!-- RIGHT: Sidebar -->
       <div class="dia-sidebar">
