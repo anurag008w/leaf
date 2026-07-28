@@ -3141,13 +3141,11 @@ const ZoneApp = (() => {
 
     const dayLabels = ['','Mon','','Wed','','Fri',''];
 
-    // Month labels row: each label positioned above its column
-    // Each column = 14px cell + 3px gap = 17px per column
-    // grid-auto-flow:column means every 7 cells = 1 column (1 week)
+    // Month labels: CSS Grid sync — grid-column matches heatmap-grid columns exactly
+    // Each grid column = 7 cells (1 week). grid-auto-columns:14px gap:3px matches heatmap.
     const monthLabelHtml = monthLabels.map(ml => {
-      const col = Math.floor(ml.index / 7); // column index, not day index
-      const leftPx = col * 17;
-      return `<span class="heatmap-month-label" style="position:absolute;left:${leftPx}px">${ml.name}</span>`;
+      const col = Math.floor(ml.index / 7); // which week-column this month starts in
+      return `<span class="heatmap-month-label" style="grid-column:${col + 1}">${ml.name}</span>`;
     }).join('');
 
     return `
@@ -3158,10 +3156,8 @@ const ZoneApp = (() => {
             ${dayLabels.map(l => `<span class="heatmap-day-label">${l}</span>`).join('')}
           </div>
           <div style="flex:1;overflow-x:auto">
-            <div style="position:relative">
-              <div class="heatmap-months">${monthLabelHtml}</div>
-              <div class="heatmap-grid">${cells}</div>
-            </div>
+            <div class="heatmap-months">${monthLabelHtml}</div>
+            <div class="heatmap-grid">${cells}</div>
           </div>
         </div>
         <div class="heatmap-legend">
