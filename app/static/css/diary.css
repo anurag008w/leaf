@@ -239,8 +239,7 @@
   background: var(--bg-1);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
+  overflow-y: auto;
 }
 .dia-vw-top {
   padding: 16px 28px 12px;
@@ -530,8 +529,7 @@ h4.dia-md-h { font-size: 16px; }
   background: var(--bg-1);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
+  overflow-y: auto;
 }
 .dia-ed-top {
   padding: 14px 24px 10px;
