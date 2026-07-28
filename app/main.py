@@ -722,6 +722,27 @@ async def keepalive(request: Request):
         raise HTTPException(403, "invalid token")
     return {"status": "alive", "timestamp": time.time()}
 
+@app.get("/api/keepalive-status")
+async def keepalive_status():
+    """Check cronjob keepalive setup status."""
+    status_file = Path("/tmp/zone-console-keepalive-status.json")
+    result = {
+        "env": {
+            "KEEPALIVE_ENABLED": os.environ.get("KEEPALIVE_ENABLED", "(not set)"),
+            "CRONJOB_API_KEY": "set" if os.environ.get("CRONJOB_API_KEY") else "(not set)",
+            "SPACE_HOST": os.environ.get("SPACE_HOST", "(not set)"),
+            "CRON_TOKEN": "set" if os.environ.get("CRON_TOKEN") else "(not set)",
+            "KEEPALIVE_CRON": os.environ.get("KEEPALIVE_CRON", "(not set)"),
+        },
+        "status_file": None,
+    }
+    if status_file.exists():
+        try:
+            result["status_file"] = json.loads(status_file.read_text())
+        except Exception:
+            result["status_file"] = "error reading status file"
+    return result
+
 # ── Config API ────────────────────────────────────
 @app.get("/api/config")
 async def get_config(request: Request):
