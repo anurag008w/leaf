@@ -1068,21 +1068,21 @@
 
   /* ── Fullscreen reading mode ───────────────────────────── */
   function toggleFullscreen() {
-    const wrap = document.querySelector('.dia-wrap');
     const viewer = document.querySelector('.dia-viewer');
     if (!viewer) return;
 
     // If already fullscreen, exit
     if (viewer.classList.contains('dia-fullscreen')) {
       viewer.classList.remove('dia-fullscreen');
-      wrap && wrap.classList.remove('dia-fs-hidden');
+      // Restore body scroll
+      document.body.style.overflow = '';
       document.removeEventListener('keydown', _fsEscHandler);
       return;
     }
 
-    // Enter fullscreen
+    // Enter fullscreen — hide page scroll so only viewer scrolls
     viewer.classList.add('dia-fullscreen');
-    wrap && wrap.classList.add('dia-fs-hidden');
+    document.body.style.overflow = 'hidden';
 
     // Build close button if not exists
     let closeBtn = viewer.querySelector('.dia-fs-close');

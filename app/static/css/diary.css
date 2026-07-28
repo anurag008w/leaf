@@ -1224,7 +1224,6 @@ h4.dia-md-h { font-size: 16px; }
 .dia-csv-table tr:hover td { background: var(--bg-3); }
 
 /* ── Fullscreen Reading Mode ────────────────────────────── */
-.dia-fs-hidden { visibility: hidden !important; pointer-events: none !important; }
 .dia-viewer.dia-fullscreen {
   position: fixed !important;
   inset: 0;
