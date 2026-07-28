@@ -3141,13 +3141,6 @@ const ZoneApp = (() => {
 
     const dayLabels = ['','Mon','','Wed','','Fri',''];
 
-    // Month labels: CSS Grid sync — grid-column matches heatmap-grid columns exactly
-    // Each grid column = 7 cells (1 week). grid-auto-columns:14px gap:3px matches heatmap.
-    const monthLabelHtml = monthLabels.map(ml => {
-      const col = Math.floor(ml.index / 7); // which week-column this month starts in
-      return `<span class="heatmap-month-label" style="grid-column:${col + 1}">${ml.name}</span>`;
-    }).join('');
-
     return `
       <div class="heatmap-section">
         <div class="heatmap-title">📊 Focus Activity — Last 6 Months</div>
@@ -3156,7 +3149,6 @@ const ZoneApp = (() => {
             ${dayLabels.map(l => `<span class="heatmap-day-label">${l}</span>`).join('')}
           </div>
           <div style="flex:1;overflow-x:auto">
-            <div class="heatmap-months">${monthLabelHtml}</div>
             <div class="heatmap-grid">${cells}</div>
           </div>
         </div>
