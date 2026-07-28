@@ -162,7 +162,7 @@ def _default_schedule() -> dict:
     return {
         "timezone": "UTC",
         "expiresAt": 0,
-        "minutes": [0, 10, 20, 30, 40, 50],
+        "minutes": [0, 12, 24, 36, 48],
         "hours": [-1],
         "mdays": [-1],
         "months": [-1],
@@ -311,7 +311,7 @@ def main() -> int:
         .split("/")[0]
     )
     target_url = os.environ.get("KEEPALIVE_URL", "").strip() or default_target_url(space_host)
-    cron_expr = os.environ.get("KEEPALIVE_CRON", "*/10 * * * *").strip()
+    cron_expr = os.environ.get("KEEPALIVE_CRON", "*/12 * * * *").strip()
 
     try:
         # Remove any stale jobs from previous starts (container restarts,
