@@ -2859,7 +2859,7 @@ const ZoneApp = (() => {
       </div>`;
 
     // Initialize charts after DOM is ready
-    setTimeout(() => initCharts(ts), 100);
+    setTimeout(() => { initCharts(ts); initHeatmapTooltip(); }, 100);
   }
 
   function showDayReport(date) {
@@ -3134,12 +3134,19 @@ const ZoneApp = (() => {
         lastMonth = d.getMonth();
       }
 
-      cells += `<div class="heatmap-cell ${isToday ? 'today' : ''}" data-level="${isFuture ? 0 : level}" title="${dateStr}: ${min}min" onclick="${!isFuture ? `ZoneApp.showDayReport('${key}')` : ''}" style="${isFuture ? 'opacity:0.3' : ''}">
-        <div class="heatmap-tooltip">${dateStr}<br><b>${min}min</b> focus</div>
-      </div>`;
+      // Portal tooltip: store tip text in data attribute, JS handles positioning
+      const tipText = `${dateStr}<br><b>${min}min</b> focus`;
+      cells += `<div class="heatmap-cell ${isToday ? 'today' : ''}" data-level="${isFuture ? 0 : level}" data-tip="${tipText}" onclick="${!isFuture ? `ZoneApp.showDayReport('${key}')` : ''}" style="${isFuture ? 'opacity:0.3' : ''}"></div>`;
     }
 
     const dayLabels = ['','Mon','','Wed','','Fri',''];
+
+    // Month labels row: each label positioned above its column
+    // Each column = 14px cell + 3px gap = 17px per column
+    const monthLabelHtml = monthLabels.map(ml => {
+      const leftPx = ml.index * 17; // relative to grid container
+      return `<span class="heatmap-month-label" style="position:absolute;left:${leftPx}px">${ml.name}</span>`;
+    }).join('');
 
     return `
       <div class="heatmap-section">
@@ -3148,7 +3155,8 @@ const ZoneApp = (() => {
           <div class="heatmap-day-labels">
             ${dayLabels.map(l => `<span class="heatmap-day-label">${l}</span>`).join('')}
           </div>
-          <div style="flex:1">
+          <div style="flex:1;position:relative">
+            <div class="heatmap-months">${monthLabelHtml}</div>
             <div class="heatmap-grid">${cells}</div>
           </div>
         </div>
@@ -3161,7 +3169,56 @@ const ZoneApp = (() => {
           <div class="heatmap-legend-cell" style="background:rgba(52,211,153,0.75)"></div>
           <span class="heatmap-legend-label">More</span>
         </div>
+        <div id="heatmapPortalTip" class="hm-portal-tip" style="display:none"></div>
       </div>`;
+  }
+
+  /* ─── HEATMAP PORTAL TOOLTIP (never clips) ─── */
+  function initHeatmapTooltip() {
+    const section = document.querySelector('.heatmap-section');
+    if (!section) return;
+    const tip = document.getElementById('heatmapPortalTip');
+    if (!tip) return;
+
+    section.addEventListener('mouseover', e => {
+      const cell = e.target.closest('.heatmap-cell');
+      if (!cell || !cell.dataset.tip) { tip.style.display = 'none'; return; }
+      tip.innerHTML = cell.dataset.tip;
+      tip.style.display = 'block';
+      const cr = cell.getBoundingClientRect();
+      const tr = tip.getBoundingClientRect();
+      // Position above cell, centered — clamp to viewport
+      let left = cr.left + cr.width / 2 - tr.width / 2;
+      let top = cr.top - tr.height - 6;
+      // Clamp horizontal
+      if (left < 4) left = 4;
+      if (left + tr.width > window.innerWidth - 4) left = window.innerWidth - tr.width - 4;
+      // If tooltip goes above viewport, show below cell
+      if (top < 4) top = cr.bottom + 6;
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    });
+    section.addEventListener('mouseout', e => {
+      const cell = e.target.closest('.heatmap-cell');
+      if (cell) tip.style.display = 'none';
+    });
+    // Also handle touch for mobile tap
+    section.addEventListener('click', e => {
+      const cell = e.target.closest('.heatmap-cell');
+      if (!cell || !cell.dataset.tip) return;
+      // On mobile, briefly show tooltip on tap
+      tip.innerHTML = cell.dataset.tip;
+      tip.style.display = 'block';
+      const cr = cell.getBoundingClientRect();
+      let left = cr.left + cr.width / 2 - 80;
+      let top = cr.top - 40;
+      if (left < 4) left = 4;
+      if (top < 4) top = cr.bottom + 6;
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+      clearTimeout(initHeatmapTooltip._hideTimer);
+      initHeatmapTooltip._hideTimer = setTimeout(() => { tip.style.display = 'none'; }, 2000);
+    });
   }
 
   function scrollToChart(id) {

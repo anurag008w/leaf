@@ -2378,16 +2378,17 @@ footer {
   border: 1px solid var(--line-soft);
 }
 .heatmap-months {
-  display: flex;
-  gap: 0;
+  position: relative;
+  height: 14px;
   margin-bottom: 4px;
-  padding-left: 2px;
 }
 .heatmap-month-label {
   font-family: var(--mono);
-  font-size: 8px;
-  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary, var(--text-muted));
   letter-spacing: 1px;
+  white-space: nowrap;
 }
 .heatmap-day-labels {
   display: grid;
@@ -2395,40 +2396,40 @@ footer {
   gap: 3px;
   margin-right: 4px;
   justify-items: end;
+  flex-shrink: 0;
 }
 .heatmap-day-label {
   font-family: var(--mono);
-  font-size: 8px;
-  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary, var(--text-muted));
   line-height: 14px;
   height: 14px;
+  opacity: 0.8;
 }
-.heatmap-tooltip {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-1);
+
+/* Portal tooltip — appended to body, never clipped */
+.hm-portal-tip {
+  position: fixed;
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-family: var(--mono);
   font-size: 9px;
   color: var(--text-primary);
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  isolation: isolate;
+  z-index: 99999;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  transition: opacity 0.12s;
 }
-.heatmap-cell:hover .heatmap-tooltip { opacity: 1; }
 
 /* Mobile: re-enable horizontal scroll for heatmap grid (~460px grid on narrow screens).
    Tooltip clipping is acceptable on mobile — no hover = no tooltip shown. */
 @media (max-width: 640px) {
   .heatmap-section { overflow-x: auto; overflow-y: hidden; }
+  .hm-portal-tip { display: none !important; }
 }
 
 /* ─── STREAK DISPLAY ─────────────────────────── */
