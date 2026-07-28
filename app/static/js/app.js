@@ -3143,8 +3143,10 @@ const ZoneApp = (() => {
 
     // Month labels row: each label positioned above its column
     // Each column = 14px cell + 3px gap = 17px per column
+    // grid-auto-flow:column means every 7 cells = 1 column (1 week)
     const monthLabelHtml = monthLabels.map(ml => {
-      const leftPx = ml.index * 17; // relative to grid container
+      const col = Math.floor(ml.index / 7); // column index, not day index
+      const leftPx = col * 17;
       return `<span class="heatmap-month-label" style="position:absolute;left:${leftPx}px">${ml.name}</span>`;
     }).join('');
 
