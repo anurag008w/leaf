@@ -1015,6 +1015,7 @@
       <div class="dia-vw-top">
         <span class="dia-vw-date-full">📅 ${fmtDFull(e.date)}</span>
         <div class="dia-vw-acts">
+          <button class="dia-ctl" onclick="ZoneApp._diaFullscreen()" title="Fullscreen View">⛶ Fullscreen</button>
           <button class="dia-ctl" onclick="ZoneApp._diaToggleView()" title="Edit Mode">✏️ Edit</button>
           <button class="dia-ctl danger" onclick="ZoneApp._diaDel('${e.id}')">🗑</button>
         </div>
@@ -1065,6 +1066,43 @@
     return h;
   }
 
+  /* ── Fullscreen reading mode ───────────────────────────── */
+  function toggleFullscreen() {
+    const wrap = document.querySelector('.dia-wrap');
+    const viewer = document.querySelector('.dia-viewer');
+    if (!viewer) return;
+
+    // If already fullscreen, exit
+    if (viewer.classList.contains('dia-fullscreen')) {
+      viewer.classList.remove('dia-fullscreen');
+      wrap && wrap.classList.remove('dia-fs-hidden');
+      document.removeEventListener('keydown', _fsEscHandler);
+      return;
+    }
+
+    // Enter fullscreen
+    viewer.classList.add('dia-fullscreen');
+    wrap && wrap.classList.add('dia-fs-hidden');
+
+    // Build close button if not exists
+    let closeBtn = viewer.querySelector('.dia-fs-close');
+    if (!closeBtn) {
+      closeBtn = document.createElement('button');
+      closeBtn.className = 'dia-fs-close';
+      closeBtn.innerHTML = '✕';
+      closeBtn.title = 'Exit fullscreen (Esc)';
+      closeBtn.onclick = () => toggleFullscreen();
+      viewer.prepend(closeBtn);
+    }
+
+    // Escape key to exit
+    document.addEventListener('keydown', _fsEscHandler);
+  }
+
+  function _fsEscHandler(ev) {
+    if (ev.key === 'Escape') toggleFullscreen();
+  }
+
   /* ── Exports to ZoneApp ───────────────────────────────── */
   ZoneApp.renderDiaryTab    = renderDiaryTab;
   ZoneApp._diaNew           = function(){ create(); };
@@ -1092,6 +1130,8 @@
   ZoneApp._diaCloseImport   = closeAnyModal;
   // View mode
   ZoneApp._diaToggleView    = toggleViewMode;
+  // Fullscreen
+  ZoneApp._diaFullscreen    = toggleFullscreen;
   // Attachments
   ZoneApp._diaTriggerFile   = triggerFileInput;
   ZoneApp._diaFileInput     = onFileInputChange;
