@@ -137,7 +137,7 @@
     fd.append('file', file);
     toast('Uploading...', 'info');
 
-    fetch('/api/diary/upload', { method: 'POST', body: fd })
+    fetch('/api/diary/upload', { method: 'POST', credentials: 'same-origin', body: fd })
       .then(r => r.json())
       .then(data => {
         if(!data.ok) throw new Error(data.detail || 'Upload failed');
@@ -165,7 +165,7 @@
     const e = entries().find(x=>x.id===_sel);
     if(!e || !e.attachments) return;
     // Delete from server
-    fetch('/api/diary/attachment/' + fileId, { method: 'DELETE' }).catch(()=>{});
+    fetch('/api/diary/attachment/' + fileId, { method: 'DELETE', credentials: 'same-origin' }).catch(()=>{});
     e.attachments = e.attachments.filter(a => a.fileId !== fileId);
     e.updated = new Date().toISOString();
     saveDiary();

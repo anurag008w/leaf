@@ -77,10 +77,19 @@ _server_restarted = True  # True until first successful auth — shows sync scre
 # ── In-memory rate limiter ─────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX = 10     # max attempts per window
+RATE_LIMIT_MAX = 30     # max attempts per window
 TOKEN_EXPIRY_SECONDS = 86400 * 7  # 7 days
 MAX_SESSIONS_TOTAL = 50           # global cap across all users
 ACTIVE_WINDOW_SECONDS = 120       # 2 min — user "active" if last request within this
+
+try:
+    RATE_LIMIT_MAX = max(5, int(os.environ.get("RATE_LIMIT_MAX", "30") or "30"))
+except (ValueError, TypeError):
+    RATE_LIMIT_MAX = 30
+try:
+    RATE_LIMIT_WINDOW = max(10, int(os.environ.get("RATE_LIMIT_WINDOW", "60") or "60"))
+except (ValueError, TypeError):
+    RATE_LIMIT_WINDOW = 60
 
 def rate_limit_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -485,7 +494,7 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/sync/status", "/api/github-sync/status", "/api/sync-screen", "/api/sync-screen/push", "/api/sync-screen/pull", "/api/desktop/app", "/api/desktop/launcher/windows", "/api/desktop/launcher/linux"}
+    exempt = {"/health", "/keepalive", "/login.html", "/api/login", "/api/guest-login", "/api/signup", "/api/reset-password", "/api/logout", "/api/sync/status", "/api/github-sync/status", "/api/sync-screen", "/api/sync-screen/push", "/api/sync-screen/pull", "/api/desktop/app", "/api/desktop/launcher/windows", "/api/desktop/launcher/linux", "/api/desktop/launcher/mac"}
     if path in exempt:
         return await call_next(request)
     if path.startswith("/api/"):
@@ -649,6 +658,34 @@ async def delete_reset_key(body: DeleteResetKeyBody, request: Request):
     save_reset_keys(keys)
     return {"keys": keys, "status": "ok"}
 
+class DeleteUserBody(BaseModel):
+    username: str
+
+@app.post("/api/admin/delete-user")
+async def delete_user(body: DeleteUserBody, request: Request):
+    uname = getattr(request.state, "username", None)
+    if uname != ZONE_USERNAME:
+        raise HTTPException(403, "only admin can delete users")
+    target = body.username.strip()
+    if not target:
+        raise HTTPException(400, "username is required")
+    if target == ZONE_USERNAME:
+        raise HTTPException(400, "cannot delete admin user")
+    users = load_users()
+    if target not in users:
+        return {"status": "ok", "message": "user did not exist"}
+    del users[target]
+    save_users(users)
+    invalidate_user_sessions(target)
+    target_dir = user_dir(target)
+    if target_dir.exists():
+        try:
+            shutil.rmtree(target_dir)
+        except OSError as e:
+            log.warning("failed to remove user data dir for %s: %s", target, e)
+    log.info("user deleted: %s", target)
+    return {"status": "ok", "message": f"user {target} deleted"}
+
 @app.get("/api/auth-check")
 async def auth_check(request: Request):
     token = getattr(request.state, "token", "")
@@ -670,9 +707,14 @@ async def change_password(body: ChangePasswordBody, request: Request):
     if _users_corrupted:
         raise HTTPException(500, "user database corrupted — contact admin")
     if uname not in users:
-        raise HTTPException(404, "user not found")
-    if not check_password(body.current_password, users[uname]):
-        raise HTTPException(403, "current password is incorrect")
+        if uname != ZONE_USERNAME or not ZONE_PASSWORD:
+            raise HTTPException(404, "user not found")
+        if not secrets.compare_digest(body.current_password, ZONE_PASSWORD):
+            raise HTTPException(403, "current password is incorrect")
+        ensure_user_dir(uname)
+    else:
+        if not check_password(body.current_password, users[uname]):
+            raise HTTPException(403, "current password is incorrect")
     if not body.new_password or len(body.new_password) < 8:
         raise HTTPException(400, "new password too short (minimum 8 characters)")
     users[uname] = hash_password(body.new_password)

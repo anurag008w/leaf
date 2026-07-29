@@ -25,10 +25,13 @@ const ZoneApp = (() => {
     examStartDate: null, // first login timestamp — ring depletes from here to exam date
     diary: [],
     selectedDate: null, // time travel: null = real today, 'YYYY-MM-DD' = selected
-    todos: []
+    todos: [],
+    username: null,
+    isAdmin: false
   };
 
   let $root, $toastContainer;
+  let _lastLocalTimerAction = 0;
 
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   // Escape for JavaScript string context inside HTML onclick="" attributes
@@ -5324,7 +5327,7 @@ const ZoneApp = (() => {
   let _lastSeenControlTs = 0;
   let _serverPollHandle = null;
   // Track when user last started/paused/resumed so poll doesn't kill local state
-  let _lastLocalTimerAction = 0;
+  _lastLocalTimerAction = 0;
 
   async function _pollTimerState() {
     if (isGuest()) return;

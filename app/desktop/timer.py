@@ -24,7 +24,11 @@ def _ensure_deps():
 _ensure_deps()
 
 import json
+import math
 import os
+import platform
+import struct
+import tempfile
 import threading
 import time as _time
 import urllib.request
@@ -88,6 +92,7 @@ def save_config(url: str, username: str, password: str):
         existing = load_saved_config()
         existing.update({"url": url, "username": username, "password": password})
         CONFIG_FILE.write_text(json.dumps(existing, indent=2))
+        CONFIG_FILE.chmod(0o600)
     except Exception:
         pass
 
@@ -158,15 +163,19 @@ class ZoneAPI:
         try:
             resp = self._opener.open(req, timeout=10)
             return json.loads(resp.read().decode())
+        except ssl.SSLError as e:
+            return {"error": f"SSL certificate error: {e}"}
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 return {"error": "unauthorized"}
             try:
                 return json.loads(e.read().decode())
             except Exception:
-                return None
-        except Exception:
-            return None
+                return {"error": f"HTTP {e.code}"}
+        except urllib.error.URLError as e:
+            return {"error": f"Connection failed: {e.reason}"}
+        except Exception as e:
+            return {"error": str(e)}
 
     def login(self, username, password):
         return self._request("POST", "/api/login", {"username": username, "password": password})
@@ -258,15 +267,17 @@ def _system_notify(title, body):
     """Cross-platform desktop notification (no extra deps)."""
     if not app_prefs["notif_enabled"] or app_prefs["quiet_mode"]:
         return
+    # Sanitize inputs for safe command-line embedding
+    safe_title = str(title).replace('"', '\\"').replace("'", "\\'")
+    safe_body = str(body).replace('"', '\\"').replace("'", "\\'")
     def _do():
         try:
-            import platform
             system = platform.system()
             if system == "Linux":
-                subprocess.Popen(["notify-send", "-a", "Zone Timer", title, body],
+                subprocess.Popen(["notify-send", "-a", "Zone Timer", safe_title, safe_body],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif system == "Darwin":
-                script = f'display notification "{body}" with title "{title}" sound name "Glass"'
+                script = f'display notification "{safe_body}" with title "{safe_title}" sound name "Glass"'
                 subprocess.Popen(["osascript", "-e", script],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif system == "Windows":
@@ -275,8 +286,8 @@ def _system_notify(title, body):
                     f'ContentType = WindowsRuntime] > $null; '
                     f'$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(0); '
                     f'$text = $xml.GetElementsByTagName(\'text\'); '
-                    f'$text.AppendChild($xml.CreateTextNode(\'{title}\')) > $null; '
-                    f'$text.AppendChild($xml.CreateTextNode(\'{body}\')) > $null; '
+                    f'$text.AppendChild($xml.CreateTextNode(\'{safe_title}\')) > $null; '
+                    f'$text.AppendChild($xml.CreateTextNode(\'{safe_body}\')) > $null; '
                     f'$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); '
                     f'[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\'Zone Timer\').Show($toast)'
                 )
@@ -291,7 +302,6 @@ def _beep(freq=880, dur_ms=150):
     """Generate a beep using platform-native commands."""
     def _do():
         try:
-            import platform, math, struct, tempfile
             system = platform.system()
             sample_rate = 22050
             n_samples = int(sample_rate * dur_ms / 1000)
@@ -308,24 +318,22 @@ def _beep(freq=880, dur_ms=150):
             if system == "Linux":
                 # Write WAV and play with paplay/aplay
                 wav = _make_wav(pcm, sample_rate)
-                for cmd in [["paplay", "--raw"], ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", "22050", "-c", "1"]]:
+                for cmd in [["paplay"], ["aplay", "-q", "-t", "wav"]]:
                     try:
-                        if cmd[0] == "paplay":
-                            tmp = Path(tempfile.mktemp(suffix=".wav"))
-                            tmp.write_bytes(wav)
-                            subprocess.Popen(cmd + [str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        else:
-                            tmp = Path(tempfile.mktemp(suffix=".raw"))
-                            tmp.write_bytes(pcm)
-                            subprocess.Popen(cmd + [str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        tmp = Path(tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name)
+                        tmp.write_bytes(wav)
+                        proc = subprocess.Popen(cmd + [str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        # Clean up temp file after playback completes
+                        threading.Timer(5, lambda p=str(tmp): Path(p).unlink(missing_ok=True)).start()
                         break
                     except FileNotFoundError:
                         continue
             elif system == "Darwin":
                 wav = _make_wav(pcm, sample_rate)
-                tmp = Path(tempfile.mktemp(suffix=".wav"))
+                tmp = Path(tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name)
                 tmp.write_bytes(wav)
                 subprocess.Popen(["afplay", str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                threading.Timer(5, lambda p=str(tmp): Path(p).unlink(missing_ok=True)).start()
             elif system == "Windows":
                 import winsound
                 winsound.Beep(freq, dur_ms)
@@ -335,7 +343,6 @@ def _beep(freq=880, dur_ms=150):
 
 def _make_wav(pcm_data, sample_rate):
     """Create a WAV file header + PCM data."""
-    import struct
     data_size = len(pcm_data)
     header = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
     fmt = struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, 1, sample_rate, sample_rate * 2, 2, 16)
@@ -575,14 +582,19 @@ ov_cfg = ctk.CTkFrame(sec_overlay.content, fg_color="transparent")
 ov_cfg.pack(fill="x", padx=8, pady=(4, 4))
 
 # ─── Overlay settings functions ───
+_ov_save_pending = None
+
 def _apply_overlay_settings_live(*_):
+    global _ov_save_pending
     fade_settings["delay_ms"] = int(slider_delay.get() * 1000)
     hide_pct = slider_hide.get()
     fade_settings["idle_alpha"] = round(1.0 - hide_pct / 100.0, 2)
     spd = slider_speed.get()
     fade_settings["fade_speed"] = 0.02 if spd < 0.33 else (0.08 if spd >= 0.66 else 0.04)
-    # Save to config so it persists across restarts
-    save_overlay_settings(slider_delay.get(), slider_hide.get(), slider_speed.get())
+    # Debounce save to avoid excessive disk writes during slider drag
+    if _ov_save_pending:
+        app.after_cancel(_ov_save_pending)
+    _ov_save_pending = app.after(500, lambda: save_overlay_settings(slider_delay.get(), slider_hide.get(), slider_speed.get()))
     # Update preview text
     _update_preview()
     if overlay_visible:
@@ -863,6 +875,8 @@ def _mk_small_btn(parent, text, fg, cmd, hover_bg=BG3):
 # DRAW RING — uses fixed dimensions, no winfo_width() dependency
 # ══════════════════════════════════════════════════════════════
 def _draw_ring(progress_pct, color, time_str, label_str, expanded, zone_txt=""):
+    if ov_canvas is None:
+        return
     ov_canvas.delete("all")
 
     # Use actual canvas size (50ms delay ensures layout is settled)
@@ -1102,6 +1116,12 @@ def _on_enter(e):
 def _on_leave(e):
     global _hovered, _fade_after_id
     _hovered = False
+    if _fade_after_id:
+        try:
+            ov.after_cancel(_fade_after_id)
+        except Exception:
+            pass
+        _fade_after_id = None
     _reset_shrink_timer()
     _fade_after_id = ov.after(fade_settings["delay_ms"], _do_idle_fade)
 
@@ -1233,12 +1253,12 @@ def get_session_data() -> dict:
     zones = server_state.get("zones", [])
     zone_cfg = zones[idx] if idx < len(zones) else {}
 
-    server_remaining = zs.get("remaining", 0)
+    server_remaining = zs.get("remaining") or 0
     total = zs.get("total", 1500)
     running = zs.get("running", False)
     last_tick = zs.get("lastTick")
     block_complete = zs.get("blockComplete", False)
-    server_overtime = zs.get("overtimeSeconds", 0)
+    server_overtime = zs.get("overtimeSeconds") or 0
     block_type = zs.get("blockType", "focus")
 
     remaining = server_remaining
@@ -1252,21 +1272,22 @@ def get_session_data() -> dict:
             remaining = max(0, server_remaining - elapsed_sec)
 
             if block_type == "break" and remaining <= 0:
-                # Break timer finished — signal auto-transition (web app
-                # handles this via handleBlockComplete; desktop needs the
-                # server-side skip action).
                 break_complete = True
                 block_complete = False
                 overtime = 0
             elif remaining <= 0 and elapsed_sec > server_remaining:
-                # Focus overtime: remaining hit 0 locally (desktop-only mode)
                 overtime = int(elapsed_sec - server_remaining)
-                block_complete = True  # treat as complete locally
+                block_complete = True
             elif block_complete:
-                # blockComplete was already set — compute live overtime
-                overtime = server_overtime + int(elapsed_sec)
+                # server_overtime already includes tick since lastTick by server;
+                # only add elapsed_sec when server_remaining is used to derive local remaining
+                pass
         except (TypeError, ValueError):
             pass
+    elif running and not last_tick:
+        # Server reports running but no lastTick (race condition) — use server values only
+        remaining = server_remaining
+        overtime = server_overtime
 
     # Auto-skip: when break finishes, tell server to transition to next focus
     # (mirrors web app's handleBlockComplete → break→focus logic)
@@ -1420,6 +1441,8 @@ def _poll_once():
     threading.Thread(target=_fetch, daemon=True).start()
 
 def _on_poll_result(data):
+    if not server_state.get("polling"):
+        return  # race: logout happened while poll was in-flight
     if data and not data.get("error") and not data.get("guest"):
         # ── Capture previous state for change detection ──
         prev = dict(_prev_poll_state)
@@ -1436,12 +1459,31 @@ def _on_poll_result(data):
         _detect_state_changes()
 
         refresh_from_server()
+        # Reset poll backoff on success
+        _on_poll_result._backoff = 2
     elif data and data.get("error") == "unauthorized":
         server_state["connected"] = False
         server_state["polling"] = False
         add_log("Session expired — reconnect")
         lbl_conn.configure(text="●", text_color=RED)
+    else:
+        # Empty or error response — back off gradually to avoid log spam
+        _poll_backoff = getattr(_on_poll_result, "_backoff", 2)
+        _on_poll_result._backoff = min(_poll_backoff * 2, 60)
+        if _poll_backoff > 4:
+            add_log("Server not responding, backing off...")
     app.after(2000, _poll_once)
+
+
+def _on_poll_error(err_msg):
+    """Handle poll network errors."""
+    if not server_state.get("polling"):
+        return
+    _poll_backoff = getattr(_on_poll_error, "_backoff", 2)
+    _on_poll_error._backoff = min(_poll_backoff * 2, 60)
+    # Only log persistent failures to avoid spam
+    if _poll_backoff >= 8:
+        add_log(f"Poll error: {err_msg}")
 
 
 def _detect_state_changes():
@@ -1609,7 +1651,9 @@ def _touchpad_scroll(e):
         scroll._parent_canvas.yview_scroll(1, "units")
     return "break"
 
-app.bind_all("<Button-4>", _touchpad_scroll)
-app.bind_all("<Button-5>", _touchpad_scroll)
+# Bind scroll only to the scrollable frame, not globally, to avoid
+# breaking scrolling in textboxes and dropdown menus.
+scroll.bind("<Button-4>", _touchpad_scroll)
+scroll.bind("<Button-5>", _touchpad_scroll)
 
 app.mainloop()
