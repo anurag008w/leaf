@@ -65,7 +65,7 @@
 
   function saveTodos() {
     try { ctx().storage().set('todos', todos()); } catch {}
-    try { fetch('/api/user-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'todos', value: todos() }) }); } catch {}
+    try { fetch('/api/user-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'todos', value: todos() }) }).catch(() => {}); } catch {}
   }
 
   /* ── Add Modal (floating) ─────────────────────────────── */

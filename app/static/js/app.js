@@ -5395,6 +5395,28 @@ const ZoneApp = (() => {
       // Apply server state directly instead of calling timerSkip (avoids double-logging)
       zs.running = false;
       stopTimer();
+      if (sZs.completed && !zs.completed) {
+        // Zone was completed server-side (last cycle finished) — mirror completeZone()
+        // instead of silently applying a cycle count past totalCycles.
+        zs.completed = true;
+        zs.blockComplete = false;
+        zs.overtimeSeconds = 0;
+        zs.cycle = sZs.cycle;
+        if (serverSession.dayComplete) {
+          finishDay();
+        } else {
+          const newIdx = serverSession.currentZoneIdx;
+          if (typeof newIdx === 'number' && newIdx !== state.currentZoneIdx) {
+            const nsZs = (serverSession.byZone || {})[String(newIdx)];
+            state.byZone[newIdx] = nsZs
+              ? { ...initZoneState(getZone(newIdx), newIdx), ...nsZs }
+              : initZoneState(getZone(newIdx), newIdx);
+            state.currentZoneIdx = newIdx;
+          }
+        }
+        renderAll();
+        return;
+      }
       zs.blockType = sZs.blockType;
       zs.remaining = sZs.remaining;
       zs.total = sZs.total;
@@ -5402,6 +5424,21 @@ const ZoneApp = (() => {
       zs.elapsed = 0;
       zs.blockComplete = false;
       zs.overtimeSeconds = 0;
+      renderAll();
+    } else if (action === 'break') {
+      // "Take Break" from desktop overlay — mirror server's focus->break transition.
+      // (Previously missing: browser stayed on stale blockType/remaining until a
+      // full poll reconcile, showing the wrong label/time.)
+      zs.blockType = 'break';
+      zs.remaining = sZs.remaining;
+      zs.total = sZs.total;
+      zs.elapsed = 0;
+      zs.blockComplete = false;
+      zs.overtimeSeconds = 0;
+      zs.running = true;
+      zs.lastTick = Date.now();
+      stopTimer();
+      state.timerHandle = setInterval(timerTick, 1000);
       renderAll();
     } else if (action === 'start') {
       if (!state.timerHandle && zs.remaining > 0) {
