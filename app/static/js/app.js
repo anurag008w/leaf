@@ -5398,10 +5398,13 @@ const ZoneApp = (() => {
       if (sZs.completed && !zs.completed) {
         // Zone was completed server-side (last cycle finished) — mirror completeZone()
         // instead of silently applying a cycle count past totalCycles.
+        const z = getZone(state.currentZoneIdx);
+        logEvent('zone_complete', { zoneIdx: state.currentZoneIdx, zoneName: z?.title });
         zs.completed = true;
         zs.blockComplete = false;
         zs.overtimeSeconds = 0;
         zs.cycle = sZs.cycle;
+        saveState();
         if (serverSession.dayComplete) {
           finishDay();
         } else {
@@ -5429,6 +5432,19 @@ const ZoneApp = (() => {
       // "Take Break" from desktop overlay — mirror server's focus->break transition.
       // (Previously missing: browser stayed on stale blockType/remaining until a
       // full poll reconcile, showing the wrong label/time.)
+      const overtimeSec = zs.overtimeSeconds || 0;
+      if (overtimeSec > 0) {
+        // Credit accumulated overtime before resetting it, same as takeBreak() —
+        // tracking.log is append-only, so a dropped entry here is unrecoverable.
+        logEvent('overtime', { zoneIdx: state.currentZoneIdx, seconds: overtimeSec, cycle: zs.cycle });
+        const extraMin = Math.round(overtimeSec / 60);
+        if (extraMin > 0) {
+          state.stats.totalFocusMin += extraMin;
+          const key = todayKey();
+          if (!state.stats.history[key]) state.stats.history[key] = { focusMin: 0, sessions: 0 };
+          state.stats.history[key].focusMin += extraMin;
+        }
+      }
       zs.blockType = 'break';
       zs.remaining = sZs.remaining;
       zs.total = sZs.total;
@@ -5439,6 +5455,7 @@ const ZoneApp = (() => {
       zs.lastTick = Date.now();
       stopTimer();
       state.timerHandle = setInterval(timerTick, 1000);
+      saveState();
       renderAll();
     } else if (action === 'start') {
       if (!state.timerHandle && zs.remaining > 0) {

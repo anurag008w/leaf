@@ -18,6 +18,8 @@
 
   let filterDone = 0; // 0=all, 1=pending, 2=done
   let _lastDeletedTodo = null;
+  let _todosSyncDirty = false;
+  let _todosSyncRetryHandle = null;
 
   /* ── CRUD ─────────────────────────────────────────────── */
   function addTodo(text, zoneIdx, cycle, priority) {
@@ -65,7 +67,26 @@
 
   function saveTodos() {
     try { ctx().storage().set('todos', todos()); } catch {}
-    try { fetch('/api/user-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'todos', value: todos() }) }).catch(() => {}); } catch {}
+    _syncTodosToServer();
+  }
+
+  function _syncTodosToServer() {
+    clearTimeout(_todosSyncRetryHandle);
+    _todosSyncRetryHandle = null;
+    fetch('/api/user-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'todos', value: todos() })
+    }).then(r => {
+      if (!r.ok) throw new Error('todos save failed: ' + r.status);
+      _todosSyncDirty = false;
+    }).catch(() => {
+      // Keep the local copy (already saved above) as the source of truth and
+      // keep retrying until it lands — each retry re-sends whatever todos()
+      // currently is, not a stale snapshot from when the failure happened.
+      _todosSyncDirty = true;
+      _todosSyncRetryHandle = setTimeout(_syncTodosToServer, 5000);
+    });
   }
 
   /* ── Add Modal (floating) ─────────────────────────────── */
