@@ -875,12 +875,12 @@ async def save_user_data(body: UserDataBody, request: Request):
                 # or a desktop break/skip. Keep the server's copy of every
                 # zone/cycle field rather than just the old current zone.
                 body.value["lastControl"] = lc
-                body.value["byZone"] = existing.get("byZone", {})
+                body.value["byZone"] = existing.get("byZone") or {}
                 body.value["currentZoneIdx"] = existing.get("currentZoneIdx", 0)
                 body.value["dayComplete"] = existing.get("dayComplete", False)
                 if action == "start":
                     idx = existing.get("currentZoneIdx", 0)
-                    zs = body.value.get("byZone", {}).get(str(idx))
+                    zs = (body.value.get("byZone") or {}).get(str(idx))
                     if zs:
                         zs["running"] = True
                         zs["lastTick"] = time.time() * 1000

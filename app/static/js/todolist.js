@@ -20,6 +20,8 @@
   let _lastDeletedTodo = null;
   let _todosSyncDirty = false;
   let _todosSyncRetryHandle = null;
+  let _todosSyncInFlight = false;
+  let _todosSyncVersion = 0;
 
   /* ── CRUD ─────────────────────────────────────────────── */
   function addTodo(text, zoneIdx, cycle, priority) {
@@ -67,23 +69,34 @@
 
   function saveTodos() {
     try { ctx().storage().set('todos', todos()); } catch {}
+    _todosSyncDirty = true;
+    _todosSyncVersion += 1;
     _syncTodosToServer();
   }
 
   function _syncTodosToServer() {
     clearTimeout(_todosSyncRetryHandle);
     _todosSyncRetryHandle = null;
+    if (_todosSyncInFlight || !_todosSyncDirty) return;
+
+    _todosSyncInFlight = true;
+    const syncVersion = _todosSyncVersion;
     fetch('/api/user-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'todos', value: todos() })
     }).then(r => {
       if (!r.ok) throw new Error('todos save failed: ' + r.status);
-      _todosSyncDirty = false;
+      _todosSyncInFlight = false;
+      // If newer edits happened while this request was in flight, sync those
+      // too instead of marking clean on a now-stale acknowledgement.
+      if (_todosSyncVersion === syncVersion) _todosSyncDirty = false;
+      else _syncTodosToServer();
     }).catch(() => {
       // Keep the local copy (already saved above) as the source of truth and
       // keep retrying until it lands — each retry re-sends whatever todos()
       // currently is, not a stale snapshot from when the failure happened.
+      _todosSyncInFlight = false;
       _todosSyncDirty = true;
       _todosSyncRetryHandle = setTimeout(_syncTodosToServer, 5000);
     });

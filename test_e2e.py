@@ -159,16 +159,16 @@ check("guest login has token", bool(body.get("token")))
 check_eq("guest login guest True", body.get("guest"), True)
 
 resp2, body2 = api("GET", "/api/auth-check")
-check("guest auth-check authed False", body2.get("authed") == False)
-check("guest auth-check guest True", body2.get("guest") == True)
+check("guest auth-check authed False", not body2.get("authed"))
+check("guest auth-check guest True", body2.get("guest"))
 check("guest auth-check username None", body2.get("username") is None)
-check("guest auth-check isAdmin False", body2.get("isAdmin") == False)
+check("guest auth-check isAdmin False", not body2.get("isAdmin"))
 
 resp, body = api("GET", "/api/user-data")
-check("guest user-data guest True", body.get("guest") == True)
+check("guest user-data guest True", body.get("guest"))
 
 resp, body = api("GET", "/api/timer/state")
-check("guest timer state guest True", body.get("guest") == True)
+check("guest timer state guest True", body.get("guest"))
 
 resp, body = api("POST", "/api/logout")
 check("guest logout ok", resp.status == 200)
@@ -189,10 +189,10 @@ check("signup has token", bool(body.get("token")))
 check_eq("signup username", body.get("username"), TEST_USER)
 
 resp, body = api("GET", "/api/auth-check")
-check("signup auth-check authed", body.get("authed") == True)
+check("signup auth-check authed", body.get("authed"))
 check("signup auth-check username", body.get("username") == TEST_USER)
-check("signup auth-check not admin", body.get("isAdmin") == False)
-check("signup auth-check not guest", body.get("guest") == False)
+check("signup auth-check not admin", not body.get("isAdmin"))
+check("signup auth-check not guest", not body.get("guest"))
 
 resp, body = api("POST", "/api/signup", {"username": TEST_USER, "password": TEST_PASS})
 check_eq("duplicate signup 409", resp.status, 409)
@@ -230,8 +230,8 @@ check("admin login 200", resp.status == 200)
 check_eq("admin username", body.get("username"), ADMIN_USER)
 
 resp, body = api("GET", "/api/auth-check")
-check("admin isAdmin True", body.get("isAdmin") == True)
-check("admin authed True", body.get("authed") == True)
+check("admin isAdmin True", body.get("isAdmin"))
+check("admin authed True", body.get("authed"))
 
 resp, body = api("GET", "/api/exam-tracks")
 check("exam-tracks admin 200", resp.status == 200)
@@ -305,7 +305,7 @@ check("config PUT saved", resp.status == 200)
 resp, body = guest_login()
 resp, body = api("PUT", "/api/config", {"zones": []})
 check("guest config PUT 200", resp.status == 200)
-check("guest config guest True", body.get("guest") == True)
+check("guest config guest True", body.get("guest"))
 
 wait()
 
@@ -364,7 +364,7 @@ check_eq("events count 1", len(body.get("events", [])), 1)
 check("stats is dict", isinstance(body.get("stats"), dict))
 check("settings is dict", isinstance(body.get("settings"), dict))
 check("examTrack is JEE", body.get("examTrack") == "JEE")
-check("onboarded is True", body.get("onboarded") == True)
+check("onboarded is True", body.get("onboarded"))
 
 # Invalid key
 resp, body = api("POST", "/api/user-data", {"key": "invalid_key", "value": {}})
@@ -375,7 +375,7 @@ resp, body = guest_login()
 resp, body = api("POST", "/api/user-data",
                  {"key": "todos", "value": [{"id": "g1", "text": "guest todo"}]})
 check("guest save data 200", resp.status == 200)
-check("guest save data guest True", body.get("guest") == True)
+check("guest save data guest True", body.get("guest"))
 
 wait()
 
@@ -414,7 +414,7 @@ check_eq("timer invalid action 400", resp.status, 400)
 resp, body = guest_login()
 resp, body = api("POST", "/api/timer/control", {"action": "start"})
 check("guest timer control 200", resp.status == 200)
-check("guest timer control guest True", body.get("guest") == True)
+check("guest timer control guest True", body.get("guest"))
 
 wait()
 
@@ -676,17 +676,17 @@ for i in range(n_zones):
     result_session = body.get("session", {})
     result_by_zone = result_session.get("byZone", {})
     result_zone = result_by_zone.get(str(i), {})
-    check(f"zone {i} marked completed after last-cycle skip", result_zone.get("completed") == True)
+    check(f"zone {i} marked completed after last-cycle skip", result_zone.get("completed"))
 
     if i == n_zones - 1:
-        check("last zone completion sets dayComplete", result_session.get("dayComplete") == True)
+        check("last zone completion sets dayComplete", result_session.get("dayComplete"))
     else:
         check(f"zone {i} completion advances currentZoneIdx to {i + 1}",
               result_session.get("currentZoneIdx") == i + 1)
         next_zone = result_by_zone.get(str(i + 1), {})
         check(f"zone {i + 1} freshly initialized after advance",
               next_zone.get("cycle") == 0 and next_zone.get("blockType") == "focus"
-              and next_zone.get("completed") == False)
+              and not next_zone.get("completed"))
         by_zone_accum = dict(result_by_zone)
 
 # Regression test (Codex review): completing a zone from the desktop must not
@@ -817,7 +817,7 @@ check("login for diary attachments ok", resp.status == 200)
 sample_bytes = b"hello from the e2e test suite"
 resp, body = api_upload("/api/diary/upload", "file", "note.txt", sample_bytes, "text/plain")
 check("diary upload 200", resp.status == 200)
-check("diary upload ok True", body.get("ok") == True)
+check("diary upload ok True", body.get("ok"))
 file_id = body.get("fileId")
 check("diary upload has fileId", bool(file_id))
 check_eq("diary upload size matches", body.get("size"), len(sample_bytes))

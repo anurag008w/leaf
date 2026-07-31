@@ -5325,6 +5325,7 @@ const ZoneApp = (() => {
 
   // ─── Server timer sync (desktop overlay) ─────
   let _lastSeenControlTs = 0;
+  let _lastSeenControlInitialized = false;
   let _serverPollHandle = null;
   // Track when user last started/paused/resumed so poll doesn't kill local state
   _lastLocalTimerAction = 0;
@@ -5338,7 +5339,15 @@ const ZoneApp = (() => {
 
       // 1. Apply desktop control actions (pause/start/stop/skip)
       const lc = serverSession.lastControl;
-      if (lc && lc.ts > _lastSeenControlTs) {
+      if (!_lastSeenControlInitialized) {
+        // First poll after this page loaded: just record the current baseline
+        // instead of acting on it — otherwise a stale action from before this
+        // page load (most commonly 'start', if the user last started a focus
+        // session and simply closed the tab instead of pausing) gets replayed
+        // and spuriously auto-starts the timer a few seconds after every load.
+        _lastSeenControlTs = (lc && lc.ts) ? lc.ts : 0;
+        _lastSeenControlInitialized = true;
+      } else if (lc && lc.ts > _lastSeenControlTs) {
         _lastSeenControlTs = lc.ts;
         _applyServerControl(lc.action, serverSession);
       }
