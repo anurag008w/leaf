@@ -875,7 +875,7 @@ async def save_user_data(body: UserDataBody, request: Request):
                 # or a desktop break/skip. Keep the server's copy of every
                 # zone/cycle field rather than just the old current zone.
                 body.value["lastControl"] = lc
-                body.value["byZone"] = existing.get("byZone", {})
+                body.value["byZone"] = existing.get("byZone") or {}
                 body.value["currentZoneIdx"] = existing.get("currentZoneIdx", 0)
                 body.value["dayComplete"] = existing.get("dayComplete", False)
                 if action == "start":
@@ -986,7 +986,7 @@ async def timer_control(body: TimerControlBody, request: Request):
 
     data = read_user_data(uname)
     session = data.get("session", {})
-    by_zone = session.get("byZone", {})
+    by_zone = session.get("byZone") or {}
     idx = session.get("currentZoneIdx", 0)
     zs = by_zone.get(str(idx))
 
