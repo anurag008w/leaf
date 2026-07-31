@@ -57,6 +57,33 @@ def api(method, path, data=None, raw=False):
         except Exception:
             return e, body
 
+def api_upload(path, field_name, filename, content, content_type):
+    """POST a multipart/form-data file upload (for diary attachments)."""
+    boundary = f"----ZoneE2E{int(time.time() * 1000)}"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n"
+    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    url = BASE.rstrip("/") + path
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    if _session_token:
+        req.add_header("Cookie", f"zone_session={_session_token}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            b = resp.read()
+            ct = resp.headers.get("Content-Type", "")
+            if "json" in ct:
+                return resp, json.loads(b)
+            return resp, b
+    except urllib.error.HTTPError as e:
+        b = e.read()
+        try:
+            return e, json.loads(b)
+        except Exception:
+            return e, b
+
 def extract_token(resp):
     """Extract zone_session token from Set-Cookie header."""
     for h in resp.headers.get_all("Set-Cookie") or []:
@@ -596,6 +623,269 @@ try:
     check("oversized data handled", resp.status in (200, 413, 422))
 except Exception:
     check("oversized data handled (connection closed)", True)
+
+# ═══════════════════════════════════════════════════
+header("19. TIMER SKIP, BREAK & ZONE-CYCLE COMPLETION")
+
+resp, body = login(TEST_USER, TEST_PASS)
+check("login for cycle test ok", resp.status == 200)
+
+resp, cfg = api("GET", "/api/config")
+zones_cfg = cfg.get("zones", [])
+n_zones = len(zones_cfg)
+check("config has zones for cycle-completion test", n_zones > 0)
+
+resp, tstate = api("GET", "/api/timer/state")
+state_zones = tstate.get("zones", [])
+check_eq("timer/state zones count matches config", len(state_zones), n_zones)
+if state_zones:
+    z0_state = state_zones[0]
+    # Regression checks for the fixed 'breakDurations' (nonexistent field) / missing
+    # 'totalCycles' bug in GET /api/timer/state.
+    check("timer/state zone has totalCycles", "totalCycles" in z0_state)
+    check("timer/state zone has breakDuration", "breakDuration" in z0_state)
+    check("timer/state zone has longBreakDuration", "longBreakDuration" in z0_state)
+    check("timer/state zone has cyclesBeforeLongBreak", "cyclesBeforeLongBreak" in z0_state)
+    check_eq("timer/state zone totalCycles matches config",
+             z0_state.get("totalCycles"), zones_cfg[0].get("totalCycles", 4))
+
+# Regression test for the cycle-overflow bug: walk every zone's LAST cycle via
+# 'skip' and confirm the zone completes, the next zone is freshly initialized,
+# currentZoneIdx advances, and dayComplete fires only once every zone is done.
+# Each iteration's session write happens >10s after the previous 'skip' control
+# action, otherwise the recent-control protection window in POST /api/user-data
+# (correctly) treats it as a stale write and keeps the server's own state.
+by_zone_accum = {}
+for i in range(n_zones):
+    if i > 0:
+        wait(11)
+    total_cycles = zones_cfg[i].get("totalCycles", 4)
+    last_cycle = max(0, total_cycles - 1)
+    by_zone_accum[str(i)] = {
+        "blockType": "break", "cycle": last_cycle, "running": False,
+        "remaining": 1, "total": 600, "elapsed": 0, "zoneElapsed": 0,
+        "blockComplete": False, "overtimeSeconds": 0, "completed": False,
+        "lastTick": None,
+    }
+    session_value = {"currentZoneIdx": i, "dayComplete": False, "byZone": by_zone_accum}
+    resp, body = api("POST", "/api/user-data", {"key": "session", "value": session_value})
+    check(f"zone {i} last-cycle session set", resp.status == 200)
+
+    resp, body = api("POST", "/api/timer/control", {"action": "skip"})
+    check(f"zone {i} skip on last cycle 200", resp.status == 200)
+    result_session = body.get("session", {})
+    result_by_zone = result_session.get("byZone", {})
+    result_zone = result_by_zone.get(str(i), {})
+    check(f"zone {i} marked completed after last-cycle skip", result_zone.get("completed") == True)
+
+    if i == n_zones - 1:
+        check("last zone completion sets dayComplete", result_session.get("dayComplete") == True)
+    else:
+        check(f"zone {i} completion advances currentZoneIdx to {i + 1}",
+              result_session.get("currentZoneIdx") == i + 1)
+        next_zone = result_by_zone.get(str(i + 1), {})
+        check(f"zone {i + 1} freshly initialized after advance",
+              next_zone.get("cycle") == 0 and next_zone.get("blockType") == "focus"
+              and next_zone.get("completed") == False)
+        by_zone_accum = dict(result_by_zone)
+
+# Regression test (Codex review): completing a zone from the desktop must not
+# clobber progress the next zone already had (e.g. from a prior partial run).
+wait(11)
+z0_cfg = zones_cfg[0] if zones_cfg else {}
+if n_zones >= 2:
+    total_cycles0 = zones_cfg[0].get("totalCycles", 4)
+    last_cycle0 = max(0, total_cycles0 - 1)
+    preexisting_next = {
+        "blockType": "focus", "cycle": 1, "running": False,
+        "remaining": 900, "total": 1800, "elapsed": 900, "zoneElapsed": 900,
+        "blockComplete": False, "overtimeSeconds": 0, "completed": False,
+        "lastTick": None,
+    }
+    session_value = {
+        "currentZoneIdx": 0, "dayComplete": False,
+        "byZone": {
+            "0": {
+                "blockType": "break", "cycle": last_cycle0, "running": False,
+                "remaining": 1, "total": 600, "elapsed": 0, "zoneElapsed": 0,
+                "blockComplete": False, "overtimeSeconds": 0, "completed": False,
+                "lastTick": None,
+            },
+            "1": preexisting_next,
+        },
+    }
+    resp, body = api("POST", "/api/user-data", {"key": "session", "value": session_value})
+    check("preexisting-next-zone session set", resp.status == 200)
+    resp, body = api("POST", "/api/timer/control", {"action": "skip"})
+    zone1_after = body.get("session", {}).get("byZone", {}).get("1", {})
+    check_eq("next zone's existing progress preserved (cycle)", zone1_after.get("cycle"), 1)
+    check_eq("next zone's existing progress preserved (remaining)", zone1_after.get("remaining"), 900)
+
+wait(11)
+
+# 'break' action: rejected when the block isn't actually finished
+session_value = {
+    "currentZoneIdx": 0, "dayComplete": False,
+    "byZone": {"0": {
+        "blockType": "focus", "cycle": 0, "running": True,
+        "remaining": 1500, "total": 1500, "elapsed": 0, "zoneElapsed": 0,
+        "blockComplete": False, "overtimeSeconds": 0, "completed": False,
+        "lastTick": time.time() * 1000,
+    }},
+}
+resp, body = api("POST", "/api/user-data", {"key": "session", "value": session_value})
+check("focus session set for break-rejection test", resp.status == 200)
+resp, body = api("POST", "/api/timer/control", {"action": "break"})
+check("break control 200 even when rejected", resp.status == 200)
+zs_after = body.get("session", {}).get("byZone", {}).get("0", {})
+check("break rejected mid-focus -> blockType unchanged", zs_after.get("blockType") == "focus")
+
+# 'break' action: accepted once block is complete, uses the normal breakDuration
+wait(11)
+session_value["byZone"]["0"].update({"remaining": 0, "blockComplete": True, "cycle": 0,
+                                      "lastTick": time.time() * 1000})
+resp, body = api("POST", "/api/user-data", {"key": "session", "value": session_value})
+check("block-complete session set for break-acceptance test", resp.status == 200)
+resp, body = api("POST", "/api/timer/control", {"action": "break"})
+check("break accepted when block complete", resp.status == 200)
+zs_after = body.get("session", {}).get("byZone", {}).get("0", {})
+check_eq("break sets blockType", zs_after.get("blockType"), "break")
+expected_break_sec = z0_cfg.get("breakDuration", 5) * 60
+check_eq("break uses normal breakDuration", zs_after.get("remaining"), expected_break_sec)
+
+# 'break' action: long break used at the cyclesBeforeLongBreak boundary
+wait(11)
+long_every = z0_cfg.get("cyclesBeforeLongBreak", 4)
+session_value["byZone"]["0"].update({
+    "blockType": "focus", "remaining": 0, "blockComplete": True,
+    "cycle": long_every - 1, "running": True, "lastTick": time.time() * 1000,
+})
+resp, body = api("POST", "/api/user-data", {"key": "session", "value": session_value})
+check("long-break-boundary session set", resp.status == 200)
+resp, body = api("POST", "/api/timer/control", {"action": "break"})
+zs_after = body.get("session", {}).get("byZone", {}).get("0", {})
+expected_long_sec = z0_cfg.get("longBreakDuration", 15) * 60
+check_eq("break uses longBreakDuration at cycle boundary", zs_after.get("remaining"), expected_long_sec)
+
+# Clean up session fixture so later sections start from a clean slate
+wait(11)
+api("POST", "/api/user-data", {"key": "session", "value": {}})
+
+wait()
+
+# ═══════════════════════════════════════════════════
+header("20. GITHUB SYNC")
+
+resp, body = login(TEST_USER, TEST_PASS)
+check("login for github-sync ok", resp.status == 200)
+
+resp, body = api("GET", "/api/github-sync/status")
+check("github-sync status 200", resp.status == 200)
+check("github-sync status is dict", isinstance(body, dict))
+
+resp, body = api("POST", "/api/github-sync/push", {"mode": "normal"})
+check_eq("non-admin github push rejected 403", resp.status, 403)
+
+resp, body = api("POST", "/api/github-sync/pull", {"mode": "normal"})
+check_eq("non-admin github pull rejected 403", resp.status, 403)
+
+wait()
+
+resp, body = login(ADMIN_USER, ADMIN_PASS)
+check("admin login for github-sync ok", resp.status == 200)
+
+resp, body = api("POST", "/api/github-sync/push", {"mode": "normal"})
+check("admin github push handled without crashing", resp.status == 200)
+check("admin github push response has success field", "success" in body)
+
+resp, body = api("POST", "/api/github-sync/pull", {"mode": "normal"})
+check("admin github pull handled without crashing", resp.status == 200)
+check("admin github pull response has success field", "success" in body)
+
+# Invalid mode falls back to 'normal' instead of erroring
+resp, body = api("POST", "/api/github-sync/push", {"mode": "not_a_real_mode"})
+check("github push invalid mode falls back gracefully", resp.status == 200)
+
+wait()
+
+# ═══════════════════════════════════════════════════
+header("21. DIARY ATTACHMENTS")
+
+resp, body = login(TEST_USER, TEST_PASS)
+check("login for diary attachments ok", resp.status == 200)
+
+sample_bytes = b"hello from the e2e test suite"
+resp, body = api_upload("/api/diary/upload", "file", "note.txt", sample_bytes, "text/plain")
+check("diary upload 200", resp.status == 200)
+check("diary upload ok True", body.get("ok") == True)
+file_id = body.get("fileId")
+check("diary upload has fileId", bool(file_id))
+check_eq("diary upload size matches", body.get("size"), len(sample_bytes))
+check("diary upload has url", body.get("url", "").endswith(str(file_id)))
+
+if file_id:
+    resp, content = api("GET", f"/api/diary/attachment/{file_id}", raw=True)
+    check("diary attachment fetch 200", resp.status == 200)
+    check_eq("diary attachment content matches upload", content, sample_bytes)
+
+resp, body = api("GET", "/api/diary/attachment/does_not_exist_123.txt", raw=True)
+check_eq("diary attachment nonexistent 404", resp.status, 404)
+
+resp, body = api("GET", "/api/diary/attachment/..%2Fmain.py", raw=True)
+check("diary attachment path traversal rejected", resp.status in (400, 404))
+
+resp, body = api_upload("/api/diary/upload", "file", "virus.exe", b"MZ", "application/octet-stream")
+check_eq("diary upload disallowed extension rejected 400", resp.status, 400)
+
+clear_session()
+resp, body = api_upload("/api/diary/upload", "file", "note2.txt", b"nope", "text/plain")
+check_eq("diary upload unauthenticated 401", resp.status, 401)
+
+if file_id:
+    resp, body = login(TEST_USER, TEST_PASS)
+    resp, body = api("DELETE", f"/api/diary/attachment/{file_id}")
+    check("diary attachment delete 200", resp.status == 200)
+
+    resp, body = api("GET", f"/api/diary/attachment/{file_id}", raw=True)
+    check_eq("diary attachment gone after delete 404", resp.status, 404)
+
+    resp, body = api("DELETE", f"/api/diary/attachment/{file_id}")
+    check("diary delete of already-deleted file is idempotent", resp.status == 200)
+
+wait()
+
+# ═══════════════════════════════════════════════════
+header("22. ADDITIONAL USER-DATA KEYS (exam dates)")
+
+resp, body = login(TEST_USER, TEST_PASS)
+check("login for exam dates ok", resp.status == 200)
+
+sample_exam_dates = [{"id": "jee-main", "date": "2027-01-15"}, {"id": "jee-advanced", "date": "2027-05-20"}]
+resp, body = api("POST", "/api/user-data", {"key": "examDates", "value": sample_exam_dates})
+check("save examDates 200", resp.status == 200)
+
+resp, body = api("POST", "/api/user-data", {"key": "examStartDate", "value": "2026-06-01"})
+check("save examStartDate 200", resp.status == 200)
+
+resp, body = api("GET", "/api/user-data")
+check_eq("examDates persisted", body.get("examDates"), sample_exam_dates)
+check_eq("examStartDate persisted", body.get("examStartDate"), "2026-06-01")
+
+wait()
+
+# ═══════════════════════════════════════════════════
+header("23. INVALID SESSION HANDLING")
+
+clear_session()
+set_session_token("this_is_not_a_real_session_token_12345")
+resp, body = api("GET", "/api/auth-check")
+check_eq("garbage session token -> 401", resp.status, 401)
+
+set_session_token("")
+resp, body = api("GET", "/api/auth-check")
+check_eq("empty session token -> 401", resp.status, 401)
+
+clear_session()
 
 # ═══════════════════════════════════════════════════
 header("RESULTS")

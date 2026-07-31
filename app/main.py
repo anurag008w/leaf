@@ -867,18 +867,19 @@ async def save_user_data(body: UserDataBody, request: Request):
             age = time.time() - lc_ts
             if age < 10:
                 action = lc.get("action", "")
+                # A control action landed very recently — the server's zone/cycle
+                # state is authoritative for this window. A client's session
+                # write (typically the browser's throttled autosave, which
+                # doesn't know about the transition yet) would otherwise
+                # silently undo a just-completed zone, a zone advance/initialize,
+                # or a desktop break/skip. Keep the server's copy of every
+                # zone/cycle field rather than just the old current zone.
                 body.value["lastControl"] = lc
-                # For any recent desktop control, preserve the full
-                # zone state from the server (blockType, remaining, etc.)
-                # — only let browser update non-timer fields.
-                idx = existing.get("currentZoneIdx", 0)
-                old_bz = existing.get("byZone", {})
-                new_bz = body.value.get("byZone", {})
-                if str(idx) in old_bz and str(idx) in new_bz:
-                    # Keep desktop's state for this zone
-                    new_bz[str(idx)] = old_bz[str(idx)]
-                    body.value["byZone"] = new_bz
+                body.value["byZone"] = existing.get("byZone", {})
+                body.value["currentZoneIdx"] = existing.get("currentZoneIdx", 0)
+                body.value["dayComplete"] = existing.get("dayComplete", False)
                 if action == "start":
+                    idx = existing.get("currentZoneIdx", 0)
                     zs = body.value.get("byZone", {}).get(str(idx))
                     if zs:
                         zs["running"] = True
@@ -964,7 +965,10 @@ async def get_timer_state(request: Request):
         zones.append({
             "title": z.get("title", "Zone"),
             "focusDuration": z.get("focusDuration", 25),
-            "breakDurations": z.get("breakDurations", []),
+            "breakDuration": z.get("breakDuration", 5),
+            "longBreakDuration": z.get("longBreakDuration", 15),
+            "cyclesBeforeLongBreak": z.get("cyclesBeforeLongBreak", 4),
+            "totalCycles": z.get("totalCycles", 4),
         })
     return {
         "session": session,
@@ -1022,11 +1026,47 @@ async def timer_control(body: TimerControlBody, request: Request):
                 zs["remaining"] = break_min * 60
                 zs["total"] = break_min * 60
             else:
-                zs["cycle"] = zs.get("cycle", 0) + 1
-                zs["blockType"] = "focus"
-                dur = (z_cfg.get("focusDuration", 25)) * 60
-                zs["remaining"] = dur
-                zs["total"] = dur
+                new_cycle = zs.get("cycle", 0) + 1
+                max_cycles = z_cfg.get("totalCycles", 4)
+                if new_cycle >= max_cycles:
+                    # Zone complete — mirrors web app's completeZone() instead of
+                    # letting `cycle` climb past totalCycles forever (bug: previously
+                    # the zone never finished when driven only from the desktop app).
+                    zs["cycle"] = new_cycle
+                    zs["completed"] = True
+                    zs["running"] = False
+                    zs["blockComplete"] = False
+                    zs["overtimeSeconds"] = 0
+                    all_done = all(
+                        by_zone.get(str(i), {}).get("completed")
+                        for i in range(len(zones_cfg))
+                    )
+                    if all_done:
+                        session["dayComplete"] = True
+                    else:
+                        next_idx = idx + 1
+                        if next_idx < len(zones_cfg):
+                            if str(next_idx) not in by_zone:
+                                next_cfg = zones_cfg[next_idx]
+                                ndur = (next_cfg.get("focusDuration", 25)) * 60
+                                by_zone[str(next_idx)] = {
+                                    "blockIdx": 0, "remaining": ndur, "total": ndur,
+                                    "running": False, "completed": False, "blockComplete": False,
+                                    "overtimeSeconds": 0, "cycle": 0, "blockType": "focus",
+                                    "elapsed": 0, "zoneElapsed": 0, "lastTick": None,
+                                }
+                            session["currentZoneIdx"] = next_idx
+                    zs["elapsed"] = 0
+                    zs["lastTick"] = now * 1000
+                    write_user_data(uname, "session", session)
+                    log.info("timer control from desktop: %s by %s", body.action, uname)
+                    return {"status": "ok", "session": session}
+                else:
+                    zs["cycle"] = new_cycle
+                    zs["blockType"] = "focus"
+                    dur = (z_cfg.get("focusDuration", 25)) * 60
+                    zs["remaining"] = dur
+                    zs["total"] = dur
             zs["elapsed"] = 0
             zs["blockComplete"] = False
             zs["overtimeSeconds"] = 0

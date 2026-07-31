@@ -970,7 +970,7 @@ def _redraw():
     else:
         _ov_timer_text = fmt_time(remaining)
         _ov_label_text = f"{label} · {status}"
-    zone_txt = f"Z{d['zone_idx']+1}/{d['total_zones']} · C{d['cycle']+1}/4"
+    zone_txt = f"Z{d['zone_idx']+1}/{d['total_zones']} · C{d['cycle']+1}/{d['total_cycles']}"
 
     _draw_ring(progress, _ov_color, _ov_timer_text, _ov_label_text,
                _overlay_expanded, zone_txt)
@@ -1276,7 +1276,12 @@ def get_session_data() -> dict:
                 block_complete = False
                 overtime = 0
             elif remaining <= 0 and elapsed_sec > server_remaining:
-                overtime = int(elapsed_sec - server_remaining)
+                # server_overtime is the already-banked overtime as of this lastTick
+                # snapshot (e.g. saved by the web app's throttled autosave, which can
+                # refresh lastTick every ~5s while running). Add newly-elapsed time on
+                # top of it instead of recomputing from scratch off elapsed_sec alone —
+                # otherwise every lastTick refresh visibly resets the desktop's counter.
+                overtime = server_overtime + int(elapsed_sec - server_remaining)
                 block_complete = True
             elif block_complete:
                 # server_overtime already includes tick since lastTick by server;
@@ -1310,6 +1315,7 @@ def get_session_data() -> dict:
         "total_zones": len(zones),
         "zone_title": zone_cfg.get("title", f"Zone {idx + 1}"),
         "focus_dur": zone_cfg.get("focusDuration", 25),
+        "total_cycles": zone_cfg.get("totalCycles", 4),
         "day_complete": session.get("dayComplete", False),
     }
 
