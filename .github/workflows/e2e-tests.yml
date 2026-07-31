@@ -1,0 +1,80 @@
+name: E2E Tests
+
+# Spins up the real FastAPI backend and runs the full test_e2e.py suite
+# against it — every API route, the timer skip/break/cycle-completion
+# flow, GitHub sync, diary attachments, data isolation, and edge cases.
+#
+# Runs on every push to main and every PR, plus manual trigger from the
+# Actions tab. No secrets required — it runs against a throwaway server
+# with throwaway admin credentials in an ephemeral data dir, so nothing
+# here touches real user data or needs repo secrets.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ZONE_USERNAME: admin
+      ZONE_PASSWORD: admin123-e2e-test-only
+      ZONE_DATA_DIR: ${{ github.workspace }}/.e2e-data
+      ZONE_TEST_URL: http://localhost:7860
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start server
+        run: |
+          mkdir -p "$ZONE_DATA_DIR"
+          nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 7860 \
+            > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7860/health > /dev/null; then
+              echo "Server is up."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become healthy in time."
+          cat server.log
+          exit 1
+
+      - name: Run test_e2e.py
+        run: python test_e2e.py
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat server.log
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server.log
+          retention-days: 7
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat server.pid)" 2>/dev/null || true
