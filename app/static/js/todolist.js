@@ -20,6 +20,7 @@
   let _lastDeletedTodo = null;
   let _todosSyncDirty = false;
   let _todosSyncRetryHandle = null;
+  let _todosSaveSeq = 0;
 
   /* ── CRUD ─────────────────────────────────────────────── */
   function addTodo(text, zoneIdx, cycle, priority) {
@@ -73,14 +74,20 @@
   function _syncTodosToServer() {
     clearTimeout(_todosSyncRetryHandle);
     _todosSyncRetryHandle = null;
+    const seq = ++_todosSaveSeq;
     fetch('/api/user-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'todos', value: todos() })
     }).then(r => {
       if (!r.ok) throw new Error('todos save failed: ' + r.status);
+      // Discard if a newer save has already been fired since this one went
+      // out — otherwise a slow older response could clear the dirty flag
+      // after a newer edit's retry was already scheduled.
+      if (seq !== _todosSaveSeq) return;
       _todosSyncDirty = false;
     }).catch(() => {
+      if (seq !== _todosSaveSeq) return;
       // Keep the local copy (already saved above) as the source of truth and
       // keep retrying until it lands — each retry re-sends whatever todos()
       // currently is, not a stale snapshot from when the failure happened.
